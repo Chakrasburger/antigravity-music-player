@@ -1735,58 +1735,54 @@
 
             const nextTrack = useCallback((isAutoNext = false) => {
                 if (playbackQueue.length === 0) return;
-
-                let nextIdx = currentTrackIndex;
-                if (repeatMode === 'one' && !isAutoNext) {
-                    // If repeat one is on and it's not an auto-next from track end, stay on current
-                    // This logic might need adjustment based on desired UX for 'repeat one' + manual next
-                } else if (repeatMode === 'one' && isAutoNext) {
-                    // If auto-next and repeat one, restart current track
-                    playTrackCore(playbackQueue[currentTrackIndex]);
-                    return;
+                let nextIdx;
+                if (repeatMode === 'one' && isAutoNext) {
+                    nextIdx = currentTrackIndex;
                 } else {
                     nextIdx = (currentTrackIndex + 1) % playbackQueue.length;
                 }
-
-                console.log(`[Playback] Skipping to next track: ${nextIdx}`);
+                const track = playbackQueue[nextIdx];
                 setCurrentTrackIndex(nextIdx);
                 setIsPlaying(true);
-            }, [playbackQueue.length, currentTrackIndex, repeatMode, playTrackCore]);
+                if (track) playTrackCore(track);
+            }, [playbackQueue, currentTrackIndex, repeatMode, playTrackCore]);
 
             const prevTrack = useCallback(() => {
                 if (playbackQueue.length === 0) return;
                 const prevIdx = currentTrackIndex > 0 ? currentTrackIndex - 1 : playbackQueue.length - 1;
-                console.log(`[Playback] Skipping to prev track: ${prevIdx}`);
+                const track = playbackQueue[prevIdx];
                 setCurrentTrackIndex(prevIdx);
                 setIsPlaying(true);
-            }, [playbackQueue.length, currentTrackIndex]);
+                if (track) playTrackCore(track);
+            }, [playbackQueue, currentTrackIndex, playTrackCore]);
 
             const selectTrack = (index, fromLibrary = false) => {
+                let track;
+                let queueIndex;
                 if (fromLibrary) {
-                    const track = library[index];
+                    track = library[index];
                     const idxInQueue = playbackQueue.findIndex(t => t.id === track.id);
                     if (idxInQueue !== -1) {
-                        if (idxInQueue === currentTrackIndex) {
-                            togglePlay();
-                        } else {
-                            setCurrentTrackIndex(idxInQueue);
-                            setIsPlaying(true);
-                        }
+                        queueIndex = idxInQueue;
                     } else {
-                        // Add track to queue, then play it — use functional update but set index after
                         const newQueue = [...playbackQueue, track];
                         setPlaybackQueue(newQueue);
-                        setCurrentTrackIndex(newQueue.length - 1);
-                        setIsPlaying(true);
+                        setOriginalQueue(newQueue);
+                        queueIndex = newQueue.length - 1;
                     }
                 } else {
-                    if (index === currentTrackIndex) {
-                        togglePlay();
-                    } else {
-                        setCurrentTrackIndex(index);
-                        setIsPlaying(true);
-                    }
+                    queueIndex = index;
+                    track = playbackQueue[index];
                 }
+                if (!track) return;
+                if (queueIndex === currentTrackIndex && isPlaying) {
+                    // Clicking the same song while playing = pause
+                    togglePlay();
+                    return;
+                }
+                setCurrentTrackIndex(queueIndex);
+                setIsPlaying(true);
+                playTrackCore(track);
             };
 
             const togglePlay = () => {
@@ -1945,7 +1941,15 @@
                 setIsLoading(true);
                 setPlaybackError(null);
 
-                const audio = audioTagRef.current;
+                // Always resolve audio element fresh — React ref may not be set if initAudioEngine wasn't called
+                const audio = audioTagRef.current || document.getElementById('engine-audio-tag');
+                if (!audio) {
+                    console.error('[playTrackCore] Audio element not found in DOM');
+                    setIsLoading(false);
+                    return;
+                }
+                audioTagRef.current = audio;
+
                 const filePath = track.filePath || track.file_path || track.fileName;
 
                 if (!filePath) {
@@ -2019,20 +2023,10 @@
             };
 
 
-            // Main Play Effect — fires whenever the user selects a different track
+            // Main Play Effect — minimal, only syncs UI state, does NOT trigger audio
             useEffect(() => {
-                if (currentTrackIndex >= 0 && playbackQueue.length > 0) {
-                    const trackToPlay = playbackQueue[currentTrackIndex];
-                    // Only start if it's a different track from what's currently active
-                    if (activeTrack && activeTrack.id === trackToPlay.id) {
-                        // Same track — just make sure we're in playing state
-                        if (!audioTagRef.current?.paused) return;
-                        audioTagRef.current?.play().then(() => setIsPlaying(true)).catch(() => { });
-                        return;
-                    }
-                    playTrackCore(trackToPlay);
-                }
-            }, [currentTrackIndex, playbackQueue]);
+                // Nothing to do here - playback is triggered directly in selectTrack/nextTrack/prevTrack
+            }, [currentTrackIndex]);
 
 
             // Dynamic Vibrancy Hook
