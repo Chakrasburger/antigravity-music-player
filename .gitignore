@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Executables
+*.exe
+
+dist/
+build/
+*.spec.bak
+
+# PyInstaller build artifacts
+dist/
+build/
+
+# Downloaded music and data
+descarga_canciones/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+test_*.py
+*.log
+
+# Local DB / settings (user-specific)
+*.json.bak
+
+# IDE
+.vscode/
+.idea/
