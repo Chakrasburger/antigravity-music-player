@@ -1794,13 +1794,13 @@
             const togglePlay = () => {
                 const audio = audioTagRef.current;
 
-                if (!audio) {
-                    // Engine not yet initialized — start the first track
-                    if (playbackQueue.length > 0) {
-                        setCurrentTrackIndex(0);
-                        setIsPlaying(true);
-                    }
-                    return;
+                if (!audio) return;
+
+                // Ensure AudioContext is init'd once on first user gesture
+                if (!audioContextRef.current) {
+                    initAudioEngine();
+                } else if (audioContextRef.current.state === 'suspended') {
+                    audioContextRef.current.resume().catch(() => { });
                 }
 
                 if (isPlaying) {
@@ -1940,7 +1940,10 @@
             const playTrackCore = (track) => {
                 if (!track) return;
 
-                initAudioEngine();
+                // Resume AudioContext if suspended (after user interaction) — only if already initialized
+                if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+                    audioContextRef.current.resume().catch(() => { });
+                }
                 setIsLoading(true);
                 setPlaybackError(null);
 
