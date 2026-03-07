@@ -84,16 +84,16 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
                     self.end_headers()
                     return
 
-                # Normalizamos la ruta para evitar errores en Windows
-                file_path = os.path.normpath(file_path)
+                # Normalizamos la ruta a absoluta para evitar ambigüedades en Windows
+                file_path = os.path.abspath(file_path)
 
-                # Si es una ruta relativa, intentamos resolverla localmente
-                if not os.path.isabs(file_path):
-                    test_path = os.path.join(BASE_DIR, file_path)
+                # Si el archivo NO existe en la ruta absoluta, intentamos buscarlo relativo al BASE_DIR
+                if not os.path.exists(file_path):
+                    test_path = os.path.join(BASE_DIR, os.path.basename(file_path))
                     if os.path.exists(test_path):
                         file_path = test_path
                     else:
-                        file_path = os.path.join(BASE_DIR, "descarga_canciones", file_path)
+                        file_path = os.path.join(BASE_DIR, "descarga_canciones", "music", os.path.basename(file_path))
                 
                 if os.path.exists(file_path) and os.path.isfile(file_path):
                     ext = os.path.splitext(file_path)[1].lower()
