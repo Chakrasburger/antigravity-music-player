@@ -51,8 +51,12 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
         '.mp3': 'audio/mpeg',
         '.flac': 'audio/flac',
         '.ogg': 'audio/ogg',
+        '.opus': 'audio/opus',
+        '.wav': 'audio/wav',
         '.m4a': 'audio/mp4',
-        '.webm': 'video/webm'
+        '.mp4': 'audio/mp4',
+        '.webm': 'audio/webm',
+        '.weba': 'audio/webm'
     }
 
     def do_GET(self):
@@ -114,6 +118,13 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
                         self.send_header('Content-Length', str(length))
                         self.send_header('Access-Control-Allow-Origin', '*')
                         self.end_headers()
+                        
+                        # Log MIME for diagnosis
+                        try:
+                            with open(os.path.join(BASE_DIR, "server_debug.log"), "a", encoding="utf-8") as log_f:
+                                if start == 0: # Only log first probe to avoid spam
+                                    log_f.write(f"{time.strftime('%H:%M:%S')} - Serving {os.path.basename(file_path)} as {mime} (Size: {file_size})\n")
+                        except: pass
 
                         with open(file_path, 'rb') as f:
                             f.seek(start)
