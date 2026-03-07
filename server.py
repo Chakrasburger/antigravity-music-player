@@ -55,7 +55,7 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
         '.wav': 'audio/wav',
         '.m4a': 'audio/mp4',
         '.mp4': 'audio/mp4',
-        '.webm': 'audio/webm',
+        '.webm': 'video/webm',
         '.weba': 'audio/webm'
     }
 
@@ -117,6 +117,7 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
                         self.send_header('Content-Range', f'bytes {start}-{end}/{file_size}')
                         self.send_header('Content-Length', str(length))
                         self.send_header('Access-Control-Allow-Origin', '*')
+                        self.send_header('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges')
                         self.end_headers()
                         
                         # Log MIME for diagnosis
@@ -142,6 +143,7 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
                         self.send_header('Accept-Ranges', 'bytes')
                         self.send_header('Content-Length', str(file_size))
                         self.send_header('Access-Control-Allow-Origin', '*')
+                        self.send_header('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges')
                         self.end_headers()
                         with open(file_path, 'rb') as f:
                             shutil.copyfileobj(f, self.wfile)
@@ -169,7 +171,7 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Range')
         self.end_headers()
 
     def do_POST(self):
