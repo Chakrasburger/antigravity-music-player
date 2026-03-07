@@ -49,6 +49,9 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
         '.json': 'application/json',
         '.xml': 'application/xml',
         '.mp3': 'audio/mpeg',
+        '.flac': 'audio/flac',
+        '.ogg': 'audio/ogg',
+        '.m4a': 'audio/mp4',
         '.webm': 'video/webm'
     }
 
@@ -68,46 +71,76 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
             
         elif parsed_path.path == '/api/file':
             try:
-                # Get the path from query params safely
+                # Decodificamos la ruta de manera segura
                 query = parse_qs(parsed_path.query)
-                file_path = query.get("path", [""])[0] # parse_qs ALREADY unquotes correctly
+                file_path = unquote(query.get("path", [""])[0]) 
                 
                 if not file_path:
                     self.send_response(400)
                     self.end_headers()
                     return
 
-                # Normalize the path for Windows
+                # Normalizamos la ruta para evitar errores en Windows
                 file_path = os.path.normpath(file_path)
 
-                # Relative path fallback for downloaded songs
+                # Si es una ruta relativa, intentamos resolverla localmente
                 if not os.path.isabs(file_path):
-                    # Check if it's in music/ or descarga_canciones/
-                    test_path = os.path.join(BASE_DIR, "descarga_canciones", file_path)
+                    test_path = os.path.join(BASE_DIR, file_path)
                     if os.path.exists(test_path):
                         file_path = test_path
                     else:
-                        file_path = os.path.join(BASE_DIR, file_path)
+                        file_path = os.path.join(BASE_DIR, "descarga_canciones", file_path)
                 
                 if os.path.exists(file_path) and os.path.isfile(file_path):
-                    print(f"[*] Serving: {file_path}")
-                    self.send_response(200)
                     ext = os.path.splitext(file_path)[1].lower()
                     mime = self.extensions_map.get(ext, 'audio/mpeg')
-                    self.send_header('Content-Type', mime)
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.send_header('Content-Length', os.path.getsize(file_path))
-                    self.send_header('Accept-Ranges', 'bytes')
-                    self.end_headers()
-                    with open(file_path, 'rb') as f:
-                        shutil.copyfileobj(f, self.wfile)
+                    file_size = os.path.getsize(file_path)
+
+                    # --- SOPORTE PARA STREAMING (HTTP 206) VITAL PARA EL SEEK Y DURACIÓN ---
+                    range_header = self.headers.get('Range', None)
+                    
+                    if range_header:
+                        # El navegador pide un bloque específico (útil para la metadata del audio)
+                        byte_range = range_header.replace('bytes=', '').split('-')
+                        start = int(byte_range[0])
+                        end = int(byte_range[1]) if len(byte_range) > 1 and byte_range[1] else file_size - 1
+                        end = min(end, file_size - 1)
+                        length = end - start + 1
+
+                        self.send_response(206)
+                        self.send_header('Content-Type', mime)
+                        self.send_header('Accept-Ranges', 'bytes')
+                        self.send_header('Content-Range', f'bytes {start}-{end}/{file_size}')
+                        self.send_header('Content-Length', str(length))
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+
+                        with open(file_path, 'rb') as f:
+                            f.seek(start)
+                            remaining = length
+                            while remaining > 0:
+                                chunk = f.read(min(8192, remaining))
+                                if not chunk:
+                                    break
+                                self.wfile.write(chunk)
+                                remaining -= len(chunk)
+                    else:
+                        # Full file response
+                        self.send_response(200)
+                        self.send_header('Content-Type', mime)
+                        self.send_header('Accept-Ranges', 'bytes')
+                        self.send_header('Content-Length', str(file_size))
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        with open(file_path, 'rb') as f:
+                            shutil.copyfileobj(f, self.wfile)
                 else:
-                    print(f"[!] File not found or not a file: {file_path}")
+                    print(f"[!] Archivo no encontrado: {file_path}")
                     self.send_response(404)
                     self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
             except Exception as e:
-                print(f"[!] Error serving file: {e}")
+                print(f"[!] Error sirviendo archivo: {e}")
                 self.send_response(500)
                 self.end_headers()
             return
@@ -138,7 +171,7 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Content-type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            self.wfile.write(json.dumps({'version': '1.0.4'}).encode('utf-8')) # Bumped to 1.0.4
+            self.wfile.write(json.dumps({'version': '1.0.4'}).encode('utf-8'))
             return
 
         # Endpoint: Búsqueda en YouTube
@@ -248,7 +281,6 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
             titulo_cancion = data.get('title')
             video_id = data.get('videoId', '')
 
-            
             if not url or not artista or not titulo_cancion:
                 self.send_response(400)
                 self.end_headers()
