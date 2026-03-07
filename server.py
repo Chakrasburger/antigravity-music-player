@@ -71,9 +71,9 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
             
         elif parsed_path.path == '/api/file':
             try:
-                # Decodificamos la ruta de manera segura
+                # Decodificamos la ruta de manera segura (parse_qs ya lo hace, no usar unquote extra)
                 query = parse_qs(parsed_path.query)
-                file_path = unquote(query.get("path", [""])[0]) 
+                file_path = query.get("path", [""])[0] 
                 
                 if not file_path:
                     self.send_response(400)
@@ -135,7 +135,14 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
                         with open(file_path, 'rb') as f:
                             shutil.copyfileobj(f, self.wfile)
                 else:
-                    print(f"[!] Archivo no encontrado: {file_path}")
+                    err_msg = f"[!] Archivo no encontrado: {file_path}"
+                    print(err_msg)
+                    # Intentar loguear a un archivo para diagnóstico en EXE
+                    try:
+                        with open(os.path.join(BASE_DIR, "server_debug.log"), "a", encoding="utf-8") as log_f:
+                            log_f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - {err_msg}\n")
+                    except: pass
+                    
                     self.send_response(404)
                     self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
@@ -659,8 +666,9 @@ socketserver.TCPServer.allow_reuse_address = True
 if __name__ == "__main__":
     os.chdir(STATIC_DIR)
     handler = AntiGravityAPIHandler
-    with socketserver.TCPServer(("", PORT), handler) as httpd:
-        print(f"✨ Reproductor e Integración de YouTube sirviendo en: http://localhost:{PORT}")
+    host = "127.0.0.1" # Forzar IPv4 para evitar problemas de resolución de 'localhost' en WebView2
+    with socketserver.TCPServer((host, PORT), handler) as httpd:
+        print(f"✨ Reproductor e Integración de YouTube sirviendo en: http://{host}:{PORT}")
         print("💡 Cierra el 'Live Server' (si lo tienes abierto) y ve a esta ruta en tu navegador.")
         print("Presiona Ctrl+C para detener el servidor.\n")
         try:

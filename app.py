@@ -55,7 +55,7 @@ if __name__ == '__main__':
     # Abrir la ventana de la aplicación web nativa
     window = webview.create_window(
         title='AntiGravity Music Player', 
-        url=f'http://localhost:{PORT}',
+        url=f'http://127.0.0.1:{PORT}',
         width=1280, 
         height=800,
         min_size=(1024, 600),

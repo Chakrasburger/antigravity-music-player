@@ -1967,8 +1967,8 @@
                 audio.src = '';
                 audio.load();
 
-                // Set new source
-                audio.src = `/api/file?path=${encodeURIComponent(filePath)}`;
+                // Set new source - Use 127.0.0.1 directly to match server binding
+                audio.src = `http://127.0.0.1:5888/api/file?path=${encodeURIComponent(filePath)}`;
 
                 // Update duration when metadata arrives
                 audio.onloadedmetadata = () => {
@@ -1986,6 +1986,7 @@
                         setIsPlaying(true);
                         setIsLoading(false);
                         setActiveTrack(track);
+                        setPlaybackError(null); // Clear errors on success
                         hasLoggedPlayRef.current = false;
                         startProgressLoop();
                         if (view === 'lyrics') {
@@ -2235,8 +2236,18 @@
                                     <div className="flex items-center gap-3">
                                         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${isServerConnected ? 'bg-green-500/10 text-green-500 border-green-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20 animate-pulse'}`}>
                                             <div className={`w-2 h-2 rounded-full ${isServerConnected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,44,44,0.6)] animate-ping'}`}></div>
-                                            {isServerConnected ? 'Backend: Connected' : 'Backend: Disconnected'}
+                                            {isServerConnected ? 'Backend: 127.0.0.1:5888' : 'Backend: Disconnected'}
                                         </div>
+                                        {playbackError && (
+                                            <div
+                                                title={playbackError}
+                                                className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-orange-500/10 text-orange-500 border border-orange-500/20 animate-pulse cursor-help"
+                                                onClick={() => alert(`Error de Reproducción Detallado:\n\n${playbackError}\n\nSugerencia: Revisa que el archivo exista en la ruta indicada o intenta re-escanear la carpeta.`)}
+                                            >
+                                                <i className="fa-solid fa-triangle-exclamation"></i>
+                                                Error de Audio
+                                            </div>
+                                        )}
                                         <div className="text-xs font-semibold text-discord-muted px-4 py-1.5 bg-black/20 rounded-full border border-white/5 shadow-sm flex items-center relative">
                                             {isScanning && <div className="absolute inset-0 bg-discord-blurple/20 animate-pulse rounded-full -z-10"></div>}
                                             {isScanning && <i className="fa-solid fa-circle-notch fa-spin mr-2 text-discord-blurple"></i>}
