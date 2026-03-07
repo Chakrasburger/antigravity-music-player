@@ -1773,13 +1773,11 @@
                             setIsPlaying(true);
                         }
                     } else {
-                        // If track not in queue, add it and play
-                        setPlaybackQueue(prev => {
-                            const newQueue = [...prev, track];
-                            setCurrentTrackIndex(newQueue.length - 1);
-                            setIsPlaying(true);
-                            return newQueue;
-                        });
+                        // Add track to queue, then play it — use functional update but set index after
+                        const newQueue = [...playbackQueue, track];
+                        setPlaybackQueue(newQueue);
+                        setCurrentTrackIndex(newQueue.length - 1);
+                        setIsPlaying(true);
                     }
                 } else {
                     if (index === currentTrackIndex) {
@@ -2021,37 +2019,20 @@
             };
 
 
-            // Main Play Effect — only triggers when user intends to play
+            // Main Play Effect — fires whenever the user selects a different track
             useEffect(() => {
-                if (!isPlaying) return; // Don't auto-play if not explicitly playing
-
                 if (currentTrackIndex >= 0 && playbackQueue.length > 0) {
                     const trackToPlay = playbackQueue[currentTrackIndex];
-                    // If the same track is already active and playing, do nothing
+                    // Only start if it's a different track from what's currently active
                     if (activeTrack && activeTrack.id === trackToPlay.id) {
+                        // Same track — just make sure we're in playing state
+                        if (!audioTagRef.current?.paused) return;
+                        audioTagRef.current?.play().then(() => setIsPlaying(true)).catch(() => { });
                         return;
                     }
                     playTrackCore(trackToPlay);
-                } else if (currentTrackIndex < 0) {
-                    // Queue cleared or reset
-                    if (audioTagRef.current) {
-                        audioTagRef.current.pause();
-                        if (audioTagRef.current.src && audioTagRef.current.src.startsWith('blob:')) {
-                            URL.revokeObjectURL(audioTagRef.current.src);
-                        }
-                        audioTagRef.current.src = '';
-                    }
-                    setIsPlaying(false);
-                    setActiveTrack(null);
-                    setCurrentTime(0);
-                    setDuration(0);
-                    if (reqAnimFrameRef.current) cancelAnimationFrame(reqAnimFrameRef.current);
                 }
-
-                return () => {
-                    if (reqAnimFrameRef.current) cancelAnimationFrame(reqAnimFrameRef.current);
-                };
-            }, [currentTrackIndex, isPlaying]);
+            }, [currentTrackIndex, playbackQueue]);
 
 
             // Dynamic Vibrancy Hook
