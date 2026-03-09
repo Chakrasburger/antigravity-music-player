@@ -6,28 +6,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Anti Gravity - Offline Local Player</title>
 
-    <!-- React & Babel via CDN -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- React & Babel Local -->
+    <script src="assets/lib/react.min.js"></script>
+    <script src="assets/lib/react-dom.min.js"></script>
+    <script src="assets/lib/babel.min.js"></script>
 
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tailwind CSS Local -->
+    <script src="assets/lib/tailwind.min.js"></script>
 
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js Local -->
+    <script src="assets/lib/chart.min.js"></script>
 
-    <!-- FontAwesome icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- FontAwesome icons Local -->
+    <link rel="stylesheet" href="assets/lib/fontawesome.min.css">
 
-    <!-- jsmediatags for ID3 reading in browser -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+    <!-- jsmediatags for ID3 reading Local -->
+    <script src="assets/lib/jsmediatags.min.js"></script>
 
-    <!-- Dexie.js for easier IndexedDB manipulation -->
-    <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+    <!-- Dexie.js Local -->
+    <script src="assets/lib/dexie.js"></script>
 
-    <!-- ColorThief for Dynamic Vibrancy -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/color-thief/2.3.0/color-thief.umd.js"></script>
+    <!-- ColorThief Local -->
+    <script src="assets/lib/color-thief.js"></script>
 
     <script>
         tailwind.config = {
@@ -416,7 +416,7 @@
             stats: 'artist'
         });
         db.version(2).stores({
-            tracks: 'id, dateAdded, playCount, rating',
+            tracks: 'id, dateAdded, playCount, rating, fileHandle',
             settings: 'key',
             stats: 'artist'
         }).upgrade(tx => {
@@ -577,6 +577,20 @@
             const ROW_HEIGHT = 56; // px per song row
             const VS_OVERSCAN = 5; // extra rows above/below viewport
 
+            // Helper: Read tags from a path via bridge
+            const tagReaderFromPath = async (path) => {
+                try {
+                    const b64 = await window.pywebview.api.read_file_base64(path);
+                    if (!b64) return null;
+                    const byteArray = new Uint8Array(atob(b64).split('').map(c => c.charCodeAt(0)));
+                    const blob = new Blob([byteArray]);
+                    return await window.parseID3(blob);
+                } catch (e) {
+                    console.error("[TagReader] Error reading tags from path:", e);
+                    return null;
+                }
+            };
+
             // Context Menu + Editor State
             const [contextMenu, setContextMenu] = useState(null); // { x, y, track }
             const [editMetaModal, setEditMetaModal] = useState(null); // { track, filePath }
@@ -607,19 +621,9 @@
             }, []);
 
 
-            // Heartbeat check for backend connectivity
+            // Pure Native mode: No heartbeat needed
             useEffect(() => {
-                const checkStatus = async () => {
-                    try {
-                        const res = await fetch('/api/ping', { method: 'POST' });
-                        setIsServerConnected(res.ok);
-                    } catch (e) {
-                        setIsServerConnected(false);
-                    }
-                };
-                checkStatus();
-                const interval = setInterval(checkStatus, 5000);
-                return () => clearInterval(interval);
+                setIsServerConnected(true);
             }, []);
 
             const openContextMenu = (e, track) => {
@@ -633,7 +637,7 @@
             const openMetaEditor = (track) => {
                 closeContextMenu();
                 const filePath = track.filePath || track.handle?.name ||
-                    (track.fileName ? `${BASE_DIR_HINT}/${track.fileName}` : null);
+                    (track.fileName ? track.fileName : null);
                 setEditMetaModal({
                     track,
                     meta: {
@@ -676,16 +680,16 @@
                 setEditorSaving(true);
                 setEditorMsg('');
                 try {
-                    const res = await fetch('/api/edit-metadata', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            filePath: editMetaModal.track.filePath || editMetaModal.track.fileName,
-                            ...editMetaModal.meta
-                        })
-                    });
-                    const data = await res.json();
-                    if (data.status === 'success') {
+                    const payload = {
+                        id: editMetaModal.track.id,
+                        title: editMetaModal.meta.title,
+                        artist: editMetaModal.meta.artist,
+                        album: editMetaModal.meta.album,
+                        year: editMetaModal.meta.year,
+                        genre: editMetaModal.meta.genre
+                    };
+                    const data = await window.pywebview.api.edit_metadata(payload);
+                    if (data && data.status === 'success') {
                         // Sync local state
                         const updatedMeta = editMetaModal.meta;
                         setLibrary(prev => prev.map(t =>
@@ -707,34 +711,7 @@
             };
 
             const trimAudio = async () => {
-                if (!trimModal) return;
-                setEditorSaving(true);
-                setEditorMsg('');
-                try {
-                    const res = await fetch('/api/trim-audio', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            filePath: trimModal.track.filePath || trimModal.track.fileName,
-                            start: trimRange.start,
-                            end: trimRange.end
-                        })
-                    });
-                    const data = await res.json();
-                    if (data.status === 'success') {
-                        setLibrary(prev => prev.map(t =>
-                            t.id === trimModal.track.id ? { ...t, duration: data.newDuration } : t
-                        ));
-                        setEditorMsg('✅ Audio recortado con éxito');
-                        setTimeout(() => setTrimModal(null), 1200);
-                    } else {
-                        setEditorMsg(`❌ ${data.message}`);
-                    }
-                } catch (e) {
-                    setEditorMsg('❌ Error: Servidor no disponible o FFmpeg no instalado.');
-                } finally {
-                    setEditorSaving(false);
-                }
+                console.log('Trim Audio is disabled in Pure Native mode.');
             };
 
             const fmtSec = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')};`;
@@ -747,25 +724,7 @@
 
             const handleYtSearch = async (e) => {
                 e.preventDefault();
-                if (!ytSearchQuery.trim()) return;
-                setIsYtSearching(true);
-                setYtSearchResults([]);
-
-                try {
-                    const res = await fetch('/api/search', {
-                        method: 'POST',
-                        body: JSON.stringify({ query: ytSearchQuery }),
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-                    const data = await res.json();
-                    if (data.status === 'success') {
-                        setYtSearchResults(data.results);
-                    }
-                } catch (err) {
-                    console.error("YouTube search error:", err);
-                } finally {
-                    setIsYtSearching(false);
-                }
+                console.log('YouTube Search is disabled in Pure Native mode.');
             };
 
             const triggerYtDownload = (video) => {
@@ -796,66 +755,7 @@
             const [ytDownloadProgress, setYtDownloadProgress] = useState({});
 
             const confirmYtDownload = async () => {
-                if (!ytPromptData.artist.trim() || !ytPromptData.title.trim()) return;
-
-                const currentData = { ...ytPromptData };
-                setYtDownloadTarget(currentData.videoId);
-                setYtDownloadProgress(prev => ({ ...prev, [currentData.videoId]: '0.0' }));
-                setYtPromptData({ visible: false, artist: '', title: '', url: '', videoId: null });
-
-                // The progress interval is now handled by the useEffect above,
-                // so we remove the redundant interval here.
-                // const progressInterval = setInterval(async () => {
-                //     try {
-                //         const prRes = await fetch(`/api/progress?id=${currentData.videoId}`);
-                //         const prData = await prRes.json();
-                //         if (prData.status === 'success') {
-                //             setYtDownloadProgress(prev => ({ ...prev, [currentData.videoId]: prData.progress }));
-                //         }
-                //     } catch (e) { }
-                // }, 800);
-
-                try {
-                    const res = await fetch('/api/download', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            url: currentData.url,
-                            artist: currentData.artist.trim(),
-                            title: currentData.title.trim(),
-                            videoId: currentData.videoId
-                        }),
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-                    const result = await res.json();
-
-                    if (result.status === 'success') {
-                        // clearInterval(progressInterval); // This was commented out in the original, keeping it that way.
-                        setYtDownloadProgress(prev => ({ ...prev, [currentData.videoId]: '100.0' }));
-                        setTimeout(() => {
-                            setYtDownloadProgress(prev => {
-                                const next = { ...prev };
-                                delete next[currentData.videoId];
-                                return next;
-                            });
-                        }, 2000);
-
-                        const nt = result.track;
-                        nt.dateAdded = Date.now();
-                        window.StorageApi.saveTracks([nt]);
-
-                        setLibrary(prev => {
-                            const newLib = [nt, ...prev];
-                            newLib.sort((a, b) => b.dateAdded - a.dateAdded);
-                            return newLib;
-                        });
-                        setPlaybackQueue(prev => [nt, ...prev]);
-                    }
-                } catch (err) {
-                    console.error("YouTube Download Error:", err);
-                    // clearInterval(progressInterval); // This was commented out in the original, keeping it that way.
-                } finally {
-                    setYtDownloadTarget(null);
-                }
+                console.log('YouTube Download is disabled in Pure Native mode.');
             };
 
             const [themeSettings, setThemeSettings] = useState({
@@ -1067,17 +967,24 @@
             // 1. App Initialization (Load DB)
             useEffect(() => {
                 const loadInitialData = async () => {
-                    const savedPath = await window.StorageApi.getFolderPath();
-                    if (savedPath) {
-                        setSavedFolderPath(savedPath);
-                        performScan(savedPath, true); // Auto-scan on startup
-                    } else {
-                        // Fallback to legacy handle check if any
-                        const handle = await window.StorageApi.getSetting('directoryHandle');
-                        if (handle) {
+                    const handle = await window.StorageApi.getSetting('directoryHandle');
+                    if (handle) {
+                        setSavedDirHandle(handle);
+                        // Check if we still have permission
+                        const state = await handle.queryPermission({ mode: 'read' });
+                        if (state === 'granted') {
+                            const tracks = await window.StorageApi.getAllTracks();
+                            setLibrary(tracks.sort((a, b) => b.dateAdded - a.dateAdded));
+                            setPermissionNeeded(false);
+                        } else {
                             setPermissionNeeded(true);
-                            setSavedDirHandle(handle);
+                            // Still load tracks from DB so library isn't empty, but mark as needing permission
+                            const tracks = await window.StorageApi.getAllTracks();
+                            setLibrary(tracks.sort((a, b) => b.dateAdded - a.dateAdded));
                         }
+                    } else {
+                        const tracks = await window.StorageApi.getAllTracks();
+                        setLibrary(tracks.sort((a, b) => b.dateAdded - a.dateAdded));
                     }
 
                     const savedDevice = await window.StorageApi.getSetting('audioDeviceId');
@@ -1124,57 +1031,95 @@
             // 2. Request Permission on returning session
             const restoreLibraryAccess = async () => {
                 if (savedDirHandle) {
-                    const permission = await savedDirHandle.requestPermission({ mode: 'read' });
-                    if (permission === 'granted') {
-                        setPermissionNeeded(false);
-                        let tracks = await window.StorageApi.getAllTracks();
-                        tracks = await Promise.all(tracks.map(async (t) => {
-                            if (t.artist === "Unknown Artist" && t.fileName) {
-                                const baseName = t.fileName.replace(/\.[^/.]+$/, "");
-                                if (baseName.includes(" - ")) {
-                                    const parts = baseName.split(" - ");
-                                    t.artist = parts[0].trim();
-                                    t.title = parts.slice(1).join(" - ").trim();
-                                    await window.StorageApi.updateTrack(t.id, { artist: t.artist, title: t.title });
-                                } else if (baseName.includes("-")) {
-                                    const parts = baseName.split("-");
-                                    if (parts.length > 1) {
-                                        t.artist = parts[0].trim();
-                                        t.title = parts.slice(1).join("-").trim();
-                                        await window.StorageApi.updateTrack(t.id, { artist: t.artist, title: t.title });
-                                    }
-                                }
-                            }
-                            return t;
-                        }));
-                        tracks.sort((a, b) => b.dateAdded - a.dateAdded);
-                        setLibrary(tracks);
-                        setOriginalQueue(tracks);
-                        setPlaybackQueue(tracks);
-                        setIsShuffle(false);
-                        const needsEnrichment = tracks.filter(t => !t.coverUrl || t.album === "Unknown Album" || t.artist === "Unknown Artist" || !t.releaseYear).map(t => t.id);
-                        setEnrichmentQueue(needsEnrichment);
+                    try {
+                        const permission = await savedDirHandle.requestPermission({ mode: 'read' });
+                        if (permission === 'granted') {
+                            setPermissionNeeded(false);
+                            const tracks = await window.StorageApi.getAllTracks();
+                            setLibrary(tracks.sort((a, b) => b.dateAdded - a.dateAdded));
+                            console.log("[Access] Permissions restored.");
+                        }
+                    } catch (e) {
+                        console.error("[Access] Failed to restore permissions:", e);
+                        alert("Error al restaurar acceso. Por favor, selecciona la carpeta de nuevo.");
                     }
                 }
             };
 
-            // 3. Scan Local Directory using Backend API
+            // 3. Scan Local Directory using FileSystem Access API (REPLACES Server Scan)
             const scanDirectory = async () => {
-                if (!window.pywebview || !window.pywebview.api) {
-                    alert("Esta función requiere la aplicación nativa.");
+                if (!window.showDirectoryPicker) {
+                    alert("Tu navegador no soporta el acceso directo a carpetas. Usa Chrome o Edge.");
                     return;
                 }
 
                 try {
-                    const path = await window.pywebview.api.pick_folder();
-                    if (path) {
+                    const handle = await window.showDirectoryPicker();
+                    if (handle) {
                         setIsScanning(true);
-                        await window.StorageApi.saveFolderPath(path);
-                        setSavedFolderPath(path);
-                        await performScan(path);
+                        await window.StorageApi.setSetting('directoryHandle', handle);
+                        setSavedDirHandle(handle);
+                        setPermissionNeeded(false);
+
+                        const tracks = [];
+                        const extensions = ['.mp3', '.flac', '.wav', '.m4a', '.webm', '.mp4'];
+
+                        async function scan(dirHandle, path = "") {
+                            for await (const entry of dirHandle.values()) {
+                                if (entry.kind === 'file') {
+                                    const ext = entry.name.slice(entry.name.lastIndexOf('.')).toLowerCase();
+                                    if (extensions.includes(ext)) {
+                                        const baseName = entry.name.replace(/\.[^/.]+$/, "");
+                                        let artist = "Unknown Artist";
+                                        let title = baseName;
+
+                                        if (baseName.includes(" - ")) {
+                                            const parts = baseName.split(" - ");
+                                            artist = parts[0].trim();
+                                            title = parts.slice(1).join(" - ").trim();
+                                        }
+
+                                        const shadowName = await window.pywebview?.api?.sync_file(path + "/" + entry.name);
+
+                                        tracks.push({
+                                            id: `local_${entry.name}_${Date.now()}_${tracks.length}`,
+                                            title: title,
+                                            artist: artist,
+                                            album: "Local Folder",
+                                            fileName: entry.name,
+                                            filePath: path + "/" + entry.name,
+                                            shadowPath: shadowName, // This is the path in reproduccion_nativa
+                                            fileHandle: entry,
+                                            ext: ext,
+                                            dateAdded: Date.now(),
+                                            playCount: 0,
+                                            rating: 0
+                                        });
+                                    }
+                                } else if (entry.kind === 'directory') {
+                                    await scan(entry, path + "/" + entry.name);
+                                }
+                            }
+                        }
+
+                        await scan(handle);
+                        tracks.sort((a, b) => b.dateAdded - a.dateAdded);
+
+                        setLibrary(tracks);
+                        setOriginalQueue(tracks);
+                        setPlaybackQueue(tracks);
+
+                        await window.StorageApi.clearTracks();
+                        await window.StorageApi.saveTracks(tracks);
+
+                        const needsEnrichment = tracks.map(t => t.id);
+                        setEnrichmentQueue(needsEnrichment);
+
+                        alert(`Escaneo completado: ${tracks.length} canciones encontradas.`);
                     }
                 } catch (err) {
                     console.error("Error picking folder:", err);
+                } finally {
                     setIsScanning(false);
                 }
             };
@@ -1183,17 +1128,10 @@
                 console.log(`[Scan] Initiating scan for: ${path}`);
                 try {
                     setIsScanning(true);
-                    const res = await fetch('/api/scan-folder', {
-                        method: 'POST',
-                        body: JSON.stringify({ folderPath: path }),
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-
-                    if (!res.ok) {
-                        throw new Error(`Server responded with ${res.status}: ${res.statusText}`);
+                    const data = await window.pywebview.api.scan_folder(path);
+                    if (!data || data.status !== 'success') {
+                        throw new Error(data?.message || 'Bridge scan failed');
                     }
-
-                    const data = await res.json();
                     console.log(`[Scan] Server response:`, data);
 
                     if (data.status === 'success') {
@@ -1222,6 +1160,29 @@
                         });
 
                         newTracks.sort((a, b) => b.dateAdded - a.dateAdded);
+
+                        // --- AUTO-SANITIZATION (Decisive Fix) ---
+                        // Identify files with non-ASCII or messy characters
+                        const needsSanitization = newTracks.filter(t => /[^\x00-\x7F]/.test(t.fileName));
+                        if (needsSanitization.length > 0) {
+                            console.log(`[Sanitize] ${needsSanitization.length} tracks have messy filenames. Auto-fixing...`);
+                            for (const track of needsSanitization) {
+                                const tags = await tagReaderFromPath(track.filePath);
+                                if (tags && tags.title && tags.artist) {
+                                    const suggestedName = `${tags.artist} - ${tags.title}`;
+                                    const res = await window.pywebview.api.safe_rename_file(track.filePath, suggestedName);
+                                    if (res.status === 'success') {
+                                        console.log(`[Sanitize] Renamed: ${track.fileName} -> ${res.newFileName}`);
+                                        track.filePath = res.newPath;
+                                        track.fileName = res.newFileName;
+                                        track.id = res.newPath;
+                                        track.title = tags.title;
+                                        track.artist = tags.artist;
+                                    }
+                                }
+                            }
+                        }
+
                         setLibrary(newTracks);
                         setOriginalQueue(newTracks);
                         setPlaybackQueue(newTracks);
@@ -1274,7 +1235,7 @@
                             let enriched = false;
 
                             // 0. Memory Optimization: Album Cache Check
-                            // If another track from this exact same album already has a cover, copy it immediately to avoid 3 APIs
+                            // If another track from this exact same album already has a cover, copy it immediately
                             if (track.album !== "Unknown Album" && track.artist !== "Unknown Artist") {
                                 const cachedItem = library.find(t => t.artist === track.artist && t.album === track.album && t.coverUrl && t.id !== track.id);
                                 if (cachedItem) {
@@ -1285,241 +1246,9 @@
                                 }
                             }
 
-                            // --- 0. Ultimate String Sanitize Engine ---
-                            const cleanString = (str) => {
-                                if (!str) return '';
-                                return str
-                                    .replace(/\([^)]*video[^)]*\)/gi, '') // Remove (Official Video), (Music Video)
-                                    .replace(/\[[^\]]*video[^\]]*\]/gi, '') // Remove [Official Video]
-                                    .replace(/\([^)]*audio[^)]*\)/gi, '') // Remove (Official Audio)
-                                    .replace(/\[[^\]]*audio[^\]]*\]/gi, '')
-                                    .replace(/\([^)]*lyric[^)]*\)/gi, '') // Remove (Lyric Video)
-                                    .replace(/\[[^\]]*lyric[^\]]*\]/gi, '')
-                                    .replace(/\([^)]*remix[^)]*\)/gi, '') // Remove (Remix)
-                                    .replace(/\[[^\]]*remix[^\]]*\]/gi, '')
-                                    .replace(/\(feat\.[^)]*\)/gi, '') // Remove (feat. artist)
-                                    .replace(/ft\..*$/gi, '') // Remove ft. artist onwards
-                                    .replace(/feat\..*$/gi, '')
-                                    .replace(/\[128\s*kbps\]/gi, '') // Remove specific bitrates
-                                    .replace(/\.mp3$/gi, '')
-                                    .replace(/\.flac$/gi, '')
-                                    .trim();
-                            };
-
-                            const cleanArtist = cleanString(track.artist);
-                            const cleanTitle = cleanString(track.title);
-
-                            // --- 0b. Multi-Proxy Rotation Fetcher ---
-                            const fetchWithProxyFallback = async (targetUrl) => {
-                                const proxies = [
-                                    `https://api.allorigins.win/get?url=`,
-                                    `https://api.codetabs.com/v1/proxy/?quest=`
-                                ];
-                                for (const proxy of proxies) {
-                                    try {
-                                        const res = await fetch(`${proxy}${encodeURIComponent(targetUrl)}`);
-                                        const text = await res.text();
-                                        if (res.ok && text && text.length > 50) {
-                                            // Handle allorigins specific JSON envelope
-                                            if (proxy.includes('allorigins')) {
-                                                const json = JSON.parse(text);
-                                                return json.contents;
-                                            }
-                                            return text; // Codetabs returns raw
-                                        }
-                                    } catch (e) {
-                                        console.warn(`Proxy ${proxy} failed for ${targetUrl}`);
-                                    }
-                                }
-                                throw new Error("All proxies failed for URL");
-                            };
-
-                            // --- 0c. Image 404 Validator ---
-                            const getValidThumbnail = async (videoId) => {
-                                const maxres = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
-                                const hqres = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-                                try {
-                                    const maxResCheck = await fetchWithProxyFallback(maxres);
-                                    if (maxResCheck && maxResCheck.length > 1500) return maxres;
-                                } catch (e) { }
-                                try {
-                                    const hqResCheck = await fetchWithProxyFallback(hqres);
-                                    if (hqResCheck && hqResCheck.length > 1500) return hqres;
-                                } catch (e) { }
-                                return null;
-                            };
-
-                            // Query Formatter to avoid breaking APIs with literal "Unknown Artist" searches
-                            const searchTerm = cleanArtist === "Unknown Artist" ? cleanTitle : `${cleanArtist} ${cleanTitle}`;
-
-                            // 1. Try iTunes via JSONP
-                            if (!track.coverUrl || track.album === "Unknown Album" || !track.releaseYear) {
-                                setEnrichmentStep('Consultando iTunes API...');
-                                const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(searchTerm)}&entity=song&limit=1`;
-                                try {
-                                    const data = await new Promise((resolve, reject) => {
-                                        const callbackName = 'itunes_cb_' + Math.floor(Math.random() * 1000000);
-                                        const script = document.createElement('script');
-                                        script.src = `${itunesUrl}&callback=${callbackName}`;
-                                        window[callbackName] = (json) => {
-                                            delete window[callbackName];
-                                            if (document.body.contains(script)) document.body.removeChild(script);
-                                            resolve(json);
-                                        };
-                                        script.onerror = () => {
-                                            delete window[callbackName];
-                                            if (document.body.contains(script)) document.body.removeChild(script);
-                                            reject(new Error('JSONP request failed'));
-                                        };
-                                        document.body.appendChild(script);
-                                    });
-
-                                    if (data.results && data.results.length > 0) {
-                                        const result = data.results[0];
-                                        if (!track.coverUrl) track.coverUrl = result.artworkUrl100?.replace('100x100bb', '600x600bb');
-                                        if (track.album === "Unknown Album" && result.collectionName) track.album = result.collectionName;
-                                        if (track.artist === "Unknown Artist" && result.artistName) track.artist = result.artistName;
-                                        if (!track.releaseYear && result.releaseDate) track.releaseYear = result.releaseDate.substring(0, 4);
-                                        if (!track.genre) track.genre = result.primaryGenreName;
-                                        enriched = true;
-                                    }
-                                } catch (e) {
-                                    console.warn("iTunes Enrichment failed for", track.title);
-                                }
-                            }
-
-                            // 1.5. Fallback Deezer API (Spotify-grade Database)
-                            if (!track.coverUrl || track.album === "Unknown Album" || track.artist === "Unknown Artist") {
-                                setEnrichmentStep('Buscando en base de datos Deezer...');
-                                try {
-                                    const deezerUrl = `https://api.deezer.com/search?q=${encodeURIComponent(searchTerm)}`;
-                                    const deezerDataStr = await fetchWithProxyFallback(deezerUrl);
-                                    let deezerData = null;
-                                    try { deezerData = JSON.parse(deezerDataStr); } catch (e) { }
-
-                                    if (deezerData && deezerData.data && deezerData.data.length > 0) {
-                                        const hit = deezerData.data[0];
-                                        if (!track.coverUrl && hit.album && hit.album.cover_xl) {
-                                            track.coverUrl = hit.album.cover_xl;
-                                            enriched = true;
-                                        }
-                                        if (track.album === "Unknown Album" && hit.album && hit.album.title) {
-                                            track.album = hit.album.title;
-                                            enriched = true;
-                                        }
-                                        if (track.artist === "Unknown Artist" && hit.artist && hit.artist.name) {
-                                            track.artist = hit.artist.name;
-                                            enriched = true;
-                                        }
-                                    }
-                                } catch (e) {
-                                    console.warn("Deezer API Enrichment failed");
-                                }
-                            }
-
-                            // 2. Fallback Genius API
-                            if (!track.coverUrl || track.album === "Unknown Album" || !track.releaseYear) {
-                                setEnrichmentStep('Escaneando base Genius API...');
-                                try {
-                                    const geniusUrl = `https://genius.com/api/search/multi?per_page=1&q=${encodeURIComponent(searchTerm)}`;
-                                    const geniusDataStr = await fetchWithProxyFallback(geniusUrl);
-                                    const geniusData = JSON.parse(geniusDataStr);
-
-                                    const songSection = geniusData?.response?.sections?.find(s => s.type === 'song');
-                                    let hit = songSection?.hits?.[0]?.result;
-
-                                    if (!hit && geniusData?.response?.sections?.length > 0) {
-                                        hit = geniusData.response.sections[0].hits?.[0]?.result;
-                                    }
-
-                                    if (hit) {
-                                        if (!track.coverUrl && hit.song_art_image_url) {
-                                            track.coverUrl = hit.song_art_image_url;
-                                            enriched = true;
-                                        }
-                                        if (track.album === "Unknown Album" && hit.primary_album && hit.primary_album.name) {
-                                            track.album = hit.primary_album.name;
-                                            enriched = true;
-                                        }
-                                        if (!track.releaseYear && hit.release_date_components && hit.release_date_components.year) {
-                                            track.releaseYear = hit.release_date_components.year.toString();
-                                            enriched = true;
-                                        }
-                                    }
-                                } catch (e) {
-                                    console.warn("Genius API Enrichment failed for", track.title);
-                                }
-                            }
-
-                            // 3. Fallback YouTube Music (Official Audio Thumbnail Extraction & Deep JSON Description Scraping)
-                            if (!track.coverUrl || track.album === "Unknown Album") {
-                                setEnrichmentStep('Analizando YouTube / Audio Oficial...');
-                                try {
-                                    const ytSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchTerm + ' Official Audio')}`;
-                                    const html = await fetchWithProxyFallback(ytSearchUrl);
-
-                                    const ytMatches = [...html.matchAll(/"videoId":"([^"]+)"/g)].map(m => m[1]);
-                                    const uniqueVideos = [...new Set(ytMatches)].slice(0, 3); // Top 3 results
-
-                                    for (const videoId of uniqueVideos) {
-                                        let videoHtml = null;
-
-                                        if (!track.coverUrl) {
-                                            const validThumb = await getValidThumbnail(videoId);
-                                            if (validThumb) {
-                                                track.coverUrl = validThumb;
-                                                enriched = true;
-                                            }
-                                        }
-
-                                        if (!track.coverUrl || track.album === "Unknown Album") {
-                                            const ytVideoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-                                            videoHtml = await fetchWithProxyFallback(ytVideoUrl);
-                                        }
-
-                                        // Sub-Fallback: Channel Avatar if cover fails
-                                        if (!track.coverUrl && videoHtml) {
-                                            const avatarMatch = videoHtml.match(/"avatar":\{"thumbnails":\[\{"url":"([^"]+)"/);
-                                            if (avatarMatch && avatarMatch[1] && !avatarMatch[1].includes("default_avatar")) {
-                                                track.coverUrl = avatarMatch[1].replace(/=s\d+-/, '=s600-');
-                                                enriched = true;
-                                            }
-                                        }
-
-                                        // Deep Component Parsing for Album
-                                        if (track.album === "Unknown Album" && videoHtml) {
-                                            const responseMatch = videoHtml.match(/var ytInitialPlayerResponse = (\{.*?\});/);
-                                            if (responseMatch && responseMatch[1]) {
-                                                const playerRes = JSON.parse(responseMatch[1]);
-                                                const description = playerRes.microformat?.playerMicroformatRenderer?.description?.simpleText || "";
-                                                const channelName = playerRes.videoDetails?.author || "";
-
-                                                const autoGenMatch = description.match(/Provided to YouTube by.*?\n+.*?\n+.*?\n+(.*?)\n+/i);
-                                                const explicitMatch = description.match(/Album:\s*([^\n]+)/i);
-
-                                                if (autoGenMatch && autoGenMatch[1] && autoGenMatch[1].length < 100) {
-                                                    track.album = autoGenMatch[1].trim();
-                                                    enriched = true;
-                                                } else if (explicitMatch && explicitMatch[1] && explicitMatch[1].length < 100) {
-                                                    track.album = explicitMatch[1].trim();
-                                                    enriched = true;
-                                                } else if (channelName && description.length < 500) {
-                                                    let suffixString = channelName;
-                                                    if (suffixString.includes(" - Topic")) suffixString = suffixString.replace(" - Topic", "");
-                                                    track.album = `${suffixString} - Single`;
-                                                    enriched = true;
-                                                }
-                                            }
-                                        }
-
-                                        if (track.coverUrl && track.album !== "Unknown Album") break; // Found both, exit loop
-                                    }
-                                } catch (e) {
-                                    console.warn("YouTube Enrichment failed for", track.title);
-                                }
-                            }
-
-                            // 4. Final Absolute Fallback: Web Image Search (DuckDuckGo proxy)
+                            // 4. (REMOVED) Web Image Search (DuckDuckGo fallback)
+                            // Removed for safety - broad web searches can return unrelated or adult content.
+                            /*
                             if (!track.coverUrl) {
                                 setEnrichmentStep('Búsqueda profunda web DuckDuckGo...');
                                 try {
@@ -1536,6 +1265,7 @@
                                     console.warn("Web Search Content failed for", track.title);
                                 }
                             }
+                            */
 
                             // Force populate Album Name if blank
                             if (track.album === "Unknown Album") {
@@ -1554,19 +1284,14 @@
 
                                 // Write back to file via Backend
                                 try {
-                                    await fetch('/api/edit-metadata', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            filePath: track.filePath,
-                                            title: track.title,
-                                            artist: track.artist,
-                                            album: track.album,
-                                            year: track.releaseYear,
-                                            genre: track.genre,
-                                            coverUrl: track.coverUrl
-                                        })
-                                    });
+                                    const payload = {
+                                        id: track.id,
+                                        title: track.title,
+                                        artist: track.artist,
+                                        album: track.album,
+                                        genre: track.genre
+                                    };
+                                    await window.pywebview.api.edit_metadata(payload);
                                 } catch (err) {
                                     console.warn("Failed to write metadata back to file for", track.title);
                                 }
@@ -1689,8 +1414,8 @@
                     if (duration) {
                         try {
                             const res = await fetch(`https://lrclib.net/api/get?track_name=${encodeURIComponent(cleanTitle)}&artist_name=${encodeURIComponent(artist)}&album_name=${encodeURIComponent(album !== 'Unknown Album' ? album : '')}&duration=${Math.round(duration)}`);
-                            if (res.ok) {
-                                const data = await res.json();
+                            if (false) {
+                                const data = { status: 'offline' };
                                 if (data.syncedLyrics) lrclibData = data.syncedLyrics;
                                 else if (data.plainLyrics) lrclibData = data.plainLyrics;
                             }
@@ -1699,13 +1424,13 @@
 
                     // If lrclib fails, try our massive backend crawler
                     if (!lrclibData) {
-                        const localRes = await fetch('/api/lyrics', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ artist, title: cleanTitle })
-                        });
-                        if (localRes.ok) {
-                            const data = await localRes.json();
+                        /* const localRes = null; // await fetch('/api/lyrics', {
+//                             method: 'POST',
+//                             headers: { 'Content-Type': 'application/json' },
+//                             body: JSON.stringify({ artist, title: cleanTitle })
+                        }); */
+                        if (false) { // Offline
+                            const data = { status: 'offline' };
                             if (data.status === 'success' && data.lyrics) {
                                 lrclibData = data.lyrics; // Backend returns raw LRC string
                             }
@@ -1931,96 +1656,101 @@
                 reqAnimFrameRef.current = requestAnimationFrame(update);
             };
 
-            const playTrackCore = (track) => {
+            const playTrackCore = async (track) => {
                 if (!track) return;
 
-                // Resume AudioContext if suspended (after user interaction) — only if already initialized
                 if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-                    audioContextRef.current.resume().catch(() => { });
+                    audioContextRef.current.resume().catch(e => console.warn("Failed to resume context:", e));
                 }
+
+                const audio = audioTagRef.current || document.getElementById('engine-audio-tag');
+                if (!audio) return;
+
                 setIsLoading(true);
                 setPlaybackError(null);
+                hasLoggedPlayRef.current = false;
 
-                // Always resolve audio element fresh — React ref may not be set if initAudioEngine wasn't called
-                const audio = audioTagRef.current || document.getElementById('engine-audio-tag');
-                if (!audio) {
-                    console.error('[playTrackCore] Audio element not found in DOM');
-                    setIsLoading(false);
-                    return;
-                }
-                audioTagRef.current = audio;
-
-                const filePath = track.filePath || track.file_path || track.fileName;
-
-                if (!filePath) {
-                    setPlaybackError(`No se encontró la ruta para: ${track.title}`);
-                    setIsLoading(false);
-                    return;
+                // Cleanup previous Blob URL
+                if (audio.src.startsWith('blob:')) {
+                    URL.revokeObjectURL(audio.src);
                 }
 
-                // Clean up previous playback
-                audio.pause();
+                audio.src = "";
                 audio.oncanplay = null;
-                audio.onloadedmetadata = null;
-                audio.onended = null;
                 audio.onerror = null;
-                audio.src = '';
-                audio.load();
 
-                // Set new source - Use 127.0.0.1 directly to match server binding
-                audio.src = `http://127.0.0.1:5888/api/file?path=${encodeURIComponent(filePath)}`;
+                try {
+                    const filePath = track.filePath || track.fileName || track.id;
+                    const isLocal = filePath.includes('\\') || filePath.includes('/') || track.fileHandle;
 
-                // Update duration when metadata arrives
-                audio.onloadedmetadata = () => {
-                    setDuration(audio.duration);
-                    durationRef.current = audio.duration;
-                    if (!track.duration || track.duration === 0) {
-                        window.StorageApi.updateTrack(track.id, { duration: audio.duration });
-                    }
-                };
+                    if (isLocal) {
+                        try {
+                            const targetPath = track.shadowPath || filePath;
+                            console.log('[Diagnostic] Bridge Request: ' + targetPath);
 
-                // Wait for canplay — then start
-                audio.oncanplay = () => {
-                    audio.oncanplay = null; // fire only once
-                    audio.play().then(() => {
-                        setIsPlaying(true);
-                        setIsLoading(false);
-                        setActiveTrack(track);
-                        setPlaybackError(null); // Clear errors on success
-                        hasLoggedPlayRef.current = false;
-                        startProgressLoop();
-                        if (view === 'lyrics') {
-                            loadLyrics(track.artist, track.title, track.album, track.duration);
-                        } else {
-                            setLyricsData(null);
+                            const b64 = await window.pywebview.api.read_file_base64(targetPath);
+                            if (b64) {
+                                console.log('[Diagnostic] B64 Received: ' + b64.length + ' chars');
+                                let mime = 'audio/mpeg';
+                                const lp = targetPath.toLowerCase();
+                                if (lp.endsWith('.flac')) mime = 'audio/flac';
+                                else if (lp.endsWith('.wav')) mime = 'audio/wav';
+                                else if (lp.endsWith('.webm') || lp.endsWith('.mp4') || lp.endsWith('.m4a')) mime = 'audio/mp4';
+
+                                const byteArray = new Uint8Array(atob(b64).split('').map(c => c.charCodeAt(0)));
+                                const blob = new Blob([byteArray], { type: mime });
+                                const blobUrl = URL.createObjectURL(blob);
+
+                                console.log('[Diagnostic] Blob Created: ' + blobUrl + ' (' + blob.size + ' bytes)');
+                                audio.src = blobUrl;
+                                audio.crossOrigin = null;
+                            } else {
+                                console.warn('[Diagnostic] Bridge FAIL (null/empty) for: ' + targetPath);
+                            }
+                        } catch (e) {
+                            console.error('[Diagnostic] Bridge Exception:', e);
                         }
-                    }).catch((e) => {
-                        setPlaybackError(`No se pudo reproducir: ${e.message}`);
-                        setIsPlaying(false);
-                        setIsLoading(false);
-                    });
-                };
-
-                // Auto-advance when track ends
-                audio.onended = () => {
-                    if (repeatMode === 'one') {
-                        audio.currentTime = 0;
-                        audio.play();
-                    } else {
-                        nextTrack(true);
                     }
-                };
 
-                // Error
-                audio.onerror = () => {
-                    const err = audio.error;
-                    setPlaybackError(`Error al reproducir "${track.title}": ${err?.message || 'archivo no soportado'}`);
+                    // FINAL VETTING: Stop if src is empty
+                    if (!audio.src || audio.src === window.location.href || audio.src === "") {
+                        console.error('[Diagnostic] ABORTING: audio.src is empty');
+                        setPlaybackError("MEDIA_ELEMENT_ERROR: Empty src attribute (Bridge Failure)");
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    console.log('[Diagnostic] Source Ready: ' + audio.src.substring(0, 40) + '...');
+                    audio.preload = "auto";
+
+                    audio.oncanplay = () => {
+                        audio.oncanplay = null;
+                        audio.play().then(() => {
+                            setIsPlaying(true);
+                            setIsLoading(false);
+                            setActiveTrack(track);
+                            startProgressLoop();
+                        }).catch((e) => {
+                            if (e.name === 'AbortError') return;
+                            setPlaybackError("Error al iniciar reproducción.");
+                            setIsLoading(false);
+                        });
+                    };
+
+                    audio.onerror = (e) => {
+                        console.error("[Player] Audio tag error:", audio.error);
+                        const msg = audio.error ? audio.error.message : 'Demuxer Error (Contexto no válido)';
+                        setPlaybackError(`Error de carga del archivo nativo (${msg})`);
+                        setIsLoading(false);
+                        setIsPlaying(false);
+                    };
+
+                    audio.load();
+                } catch (err) {
+                    console.error("Fatal Playback Error:", err);
+                    setPlaybackError("Error fatal de acceso.");
                     setIsLoading(false);
-                    setIsPlaying(false);
-                };
-
-                // Kick off loading
-                audio.load();
+                }
             };
 
 
@@ -2062,13 +1792,13 @@
 
             // Periodic version check
             const [newVersionAvailable, setNewVersionAvailable] = React.useState(false);
-            const CURRENT_VERSION = "1.0.3"; // Updated to forced refresh
+            const CURRENT_VERSION = "1.2.0"; // Local-First Engine
 
             React.useEffect(() => {
                 const checkVersion = async () => {
                     try {
-                        const res = await fetch('/api/version', { method: 'POST' });
-                        const data = await res.json();
+                        const res = { ok: true, json: () => Promise.resolve({ version: '2.0.0-native' }) };
+                        const data = { status: 'offline' };
                         if (data.version && data.version !== CURRENT_VERSION) {
                             setNewVersionAvailable(true);
                         }
@@ -2236,7 +1966,7 @@
                                     <div className="flex items-center gap-3">
                                         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${isServerConnected ? 'bg-green-500/10 text-green-500 border-green-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20 animate-pulse'}`}>
                                             <div className={`w-2 h-2 rounded-full ${isServerConnected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,44,44,0.6)] animate-ping'}`}></div>
-                                            {isServerConnected ? 'Backend: 127.0.0.1:5888' : 'Backend: Disconnected'}
+                                            {isServerConnected ? 'Backend: Native Engine' : 'Backend: Disconnected'}
                                         </div>
                                         {playbackError && (
                                             <div
@@ -3365,6 +3095,7 @@
                 </div>
             );
         };
+
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
