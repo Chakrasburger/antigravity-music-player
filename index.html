@@ -86,6 +86,7 @@
         };
         window.onunhandledrejection = (event) => {
             console.error(`PROMISE REJECTION: ${event.reason}`);
+        };
     </script>
     <script>
             tailwind.config = {
@@ -615,7 +616,7 @@
             const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
             const formatTime = (seconds) => {
-                if (!seconds || isNaN(seconds) || seconds <= 0) return "--:--";
+                if (seconds === undefined || seconds === null || isNaN(seconds) || seconds < 0) return "--:--";
                 const h = Math.floor(seconds / 3600);
                 const m = Math.floor((seconds % 3600) / 60);
                 const s = Math.floor(seconds % 60);
@@ -623,7 +624,7 @@
                 return `${m}:${s.toString().padStart(2, '0')}`;
             };
             const App = () => {
-                const [view, setView] = useState('songs'); // 'songs', 'analytics', 'queue', 'lyrics', 'searchYt'
+                const [view, setView] = useState('songs'); // 'songs', 'analytics', 'queue', 'lyrics', 'searchYt', 'ai-assistant'
                 const [previousView, setPreviousView] = useState('songs');
                 const [library, setLibrary] = useState([]);
                 const [isScanning, setIsScanning] = useState(false);
@@ -782,7 +783,30 @@
 
                 const handleYtSearch = async (e) => {
                     e.preventDefault();
-                    console.log('YouTube Search is disabled in Pure Native mode.');
+                    if (!ytSearchQuery.trim()) return;
+
+                    setIsYtSearching(true);
+                    setYtSearchResults([]);
+                    
+                    try {
+                        const res = await fetch('http://127.0.0.1:5888/api/search', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ query: ytSearchQuery })
+                        });
+                        
+                        const data = await res.json();
+                        if (data.status === 'success') {
+                            setYtSearchResults(data.results);
+                        } else {
+                            alert('No se pudieron obtener resultados.');
+                        }
+                    } catch (error) {
+                        console.error('Error fetching search results:', error);
+                        alert('Error al conectar con el backend. Asegúrate de que el servidor está corriendo.');
+                    } finally {
+                        setIsYtSearching(false);
+                    }
                 };
 
                 const triggerYtDownload = (video) => {
@@ -813,7 +837,79 @@
                 const [ytDownloadProgress, setYtDownloadProgress] = useState({});
 
                 const confirmYtDownload = async () => {
-                    console.log('YouTube Download is disabled in Pure Native mode.');
+                    if (!ytPromptData.artist.trim() || !ytPromptData.title.trim() || !ytPromptData.url) {
+                        alert("Artista y Canción son obligatorios.");
+                        return;
+                    }
+
+                    const { url, artist, title, videoId } = ytPromptData;
+                    setYtPromptData({ ...ytPromptData, visible: false });
+
+                    // Inicializar progreso visual si hay un ID
+                    if (videoId) {
+                        setYtDownloadProgress(prev => ({ ...prev, [videoId]: "0.0" }));
+                        
+                        const pollInterval = setInterval(async () => {
+                            try {
+                                const pres = await fetch(`http://127.0.0.1:5888/api/progress?id=${videoId}`);
+                                const pdata = await pres.json();
+                                if (pdata.status === 'success') {
+                                    setYtDownloadProgress(prev => ({ ...prev, [videoId]: pdata.progress }));
+                                    if (parseFloat(pdata.progress) >= 100) clearInterval(pollInterval);
+                                }
+                            } catch (e) {
+                                clearInterval(pollInterval);
+                            }
+                        }, 1000);
+                        
+                        // Guardar la referencia al intervalo de ser necesario o dejarlo auto-limpiable en caso de error.
+                    }
+
+                    try {
+                        const res = await fetch('http://127.0.0.1:5888/api/download', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url, artist, title, videoId })
+                        });
+
+                        const data = await res.json();
+                        if (data.status === 'success') {
+                            // Agregar a la biblioteca temporal si no existe o lanzar re-escan
+                            setTimeout(() => alert(`"${title}" descargada con éxito.`), 300);
+                            // Idealmente relanzamos scanFolder() o agregamos al state `library`:
+                            setLibrary(prev => [data.track, ...prev]);
+                            window.StorageApi.saveTracks([data.track, ...library]);
+                            setOriginalQueue(prev => [data.track, ...prev]);
+                            setPlaybackQueue(prev => [data.track, ...prev]);
+
+                            if (videoId) {
+                                setYtDownloadProgress(prev => {
+                                    const next = { ...prev };
+                                    delete next[videoId];
+                                    return next;
+                                });
+                            }
+                        } else {
+                            alert("Fallo la descarga.");
+                            if (videoId) {
+                                setYtDownloadProgress(prev => {
+                                    const next = { ...prev };
+                                    delete next[videoId];
+                                    return next;
+                                });
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error in download:', error);
+                        alert("Error al contactar con el downloader.");
+                        if (videoId) {
+                            setYtDownloadProgress(prev => {
+                                const next = { ...prev };
+                                delete next[videoId];
+                                return next;
+                            });
+                        }
+                    }
                 };
 
                 const [themeSettings, setThemeSettings] = useState({
@@ -896,6 +992,73 @@
                 const hasLoggedPlayRef = useRef(false);
                 const objectUrlRef = useRef(null);
                 const lyricsContainerRef = useRef(null);
+
+                // AI Assistant State
+                const [aiMessages, setAiMessages] = useState([
+                    { role: 'ai', text: '¡Hola! Soy Chakras Guru, tu asistente musical. ¿Qué te gustaría escuchar hoy? Puedo buscar temas relajantes, hacer playlists para entrenar, o sorprendente con algo aleatorio.', playlist: null, playlistName: null }
+                ]);
+                const [aiInput, setAiInput] = useState('');
+                const [isAiThinking, setIsAiThinking] = useState(false);
+                const chatEndRef = useRef(null);
+
+                // Scroll to bottom of Chat
+                useEffect(() => {
+                    if (view === 'ai-assistant' && chatEndRef.current) {
+                        chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+                    }
+                }, [aiMessages, view]);
+
+                const handleAiSubmit = async (e) => {
+                    e.preventDefault();
+                    if (!aiInput.trim() || isAiThinking) return;
+
+                    const userMsg = { role: 'user', text: aiInput.trim(), playlist: null };
+                    setAiMessages(prev => [...prev, userMsg]);
+                    setAiInput('');
+                    setIsAiThinking(true);
+
+                    try {
+                        const res = await fetch('http://127.0.0.1:5888/api/ai-chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                query: userMsg.text,
+                                library: library // Enviamos el catálogo para el contexto offline
+                            })
+                        });
+                        const data = await res.json();
+                        
+                        if (data.status === 'success') {
+                            setAiMessages(prev => [...prev, {
+                                role: 'ai',
+                                text: data.reply,
+                                playlist: data.playlist && data.playlist.length > 0 ? data.playlist : null,
+                                playlistName: data.playlistName
+                            }]);
+                        } else {
+                            throw new Error(data.message);
+                        }
+                    } catch (err) {
+                        setAiMessages(prev => [...prev, { role: 'ai', text: 'Ups, perdí conexión con mi base de datos neuronal. Revisa si el servidor está activo.', playlist: null }]);
+                    } finally {
+                        setIsAiThinking(false);
+                    }
+                };
+
+                const playAiPlaylist = (playlist) => {
+                    if (!playlist || playlist.length === 0) return;
+                    setPlaybackQueue([...playlist]);
+                    setCurrentTrackIndex(0);
+                    // Disparamos la reproduccion en el proximo render
+                    setTimeout(() => {
+                        const audio = audioTagRef.current || document.getElementById('engine-audio-tag');
+                        if (audio && audio.paused) {
+                            togglePlay(); // o playTrackCore(playlist[0]) directamente
+                        } else if (!audio || audio.paused) {
+                            playTrackCore(playlist[0]);
+                        }
+                    }, 50);
+                };
 
                 // --- Advanced Audio Graph Refs (Gapless & Crossfade) ---
                 const [isEqEnabled, setIsEqEnabled] = useState(true);
@@ -1537,7 +1700,7 @@
                     if (reqAnimFrameRef.current) cancelAnimationFrame(reqAnimFrameRef.current);
 
                     const update = () => {
-                        if (audioTagRef.current && isPlaying) {
+                        if (audioTagRef.current && !audioTagRef.current.paused) {
                             const current = audioTagRef.current.currentTime;
                             const dur = audioTagRef.current.duration;
 
@@ -1690,7 +1853,16 @@
                         // Configuración del elemento de audio
                         audio.src = streamUrl;
                         audio.crossOrigin = 'anonymous';
-                        audio.oncanplay = null;
+
+                        audio.onloadedmetadata = () => {
+                            if (audio.duration && !isNaN(audio.duration) && audio.duration !== Infinity) {
+                                setDuration(audio.duration);
+                                durationRef.current = audio.duration;
+                                if (uiProgressInputRef.current) {
+                                    uiProgressInputRef.current.max = audio.duration;
+                                }
+                            }
+                        };
 
                         audio.onerror = (e) => {
                             console.error("[Player] Audio tag error:", audio.error);
@@ -1791,6 +1963,9 @@
                 const handleVolume = (e) => {
                     const vol = Number(e.target.value);
                     setVolume(vol);
+                    if (audioTagRef.current) {
+                        audioTagRef.current.volume = vol;
+                    }
                     if (gainNodeRef.current && audioContextRef.current) {
                         gainNodeRef.current.gain.linearRampToValueAtTime(vol, audioContextRef.current.currentTime + 0.1);
                     }
@@ -1883,6 +2058,10 @@
                                             <i className="fa-solid fa-chart-simple w-5 text-center"></i>
                                             <span className="text-sm">Analytics</span>
                                         </div>
+                                        <div onClick={() => setView('ai-assistant')} className={`flex items-center gap-4 px-3 py-2.5 rounded-md cursor-pointer transition-colors ${view === 'ai-assistant' ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-purple-400 font-semibold border border-purple-500/20' : 'text-discord-muted hover:bg-discord-tertiary/50 hover:text-discord-text'}`}>
+                                            <i className="fa-solid fa-wand-magic-sparkles w-5 text-center"></i>
+                                            <span className="text-sm">Guru IA</span>
+                                        </div>
                                         <div onClick={() => setView('downloads')} className={`flex items-center gap-4 px-3 py-2.5 rounded-md cursor-pointer transition-colors ${view === 'downloads' ? 'bg-discord-secondary text-discord-text font-semibold' : 'text-discord-muted hover:bg-discord-tertiary/50 hover:text-discord-text'}`}>
                                             <i className="fa-solid fa-download w-5 text-center"></i>
                                             <span className="text-sm">Downloads</span>
@@ -1915,7 +2094,7 @@
                                                 <i className="fa-solid fa-bolt animate-pulse"></i>
                                                 Nueva Versión Disponible
                                             </button>
-                                            <div className="px-5 text-[10px] text-discord-muted uppercase tracking-widest font-bold">AntiGravity {CURRENT_VERSION}</div>
+                                            <div className="px-5 text-[10px] text-discord-muted uppercase tracking-widest font-bold">ChakrasPlayer {CURRENT_VERSION}</div>
                                         </div>
                                     )}
                                 </aside>
@@ -2070,20 +2249,24 @@
                                                                                 )}
                                                                                 <div className="flex flex-col min-w-0">
                                                                                     <div className="flex items-center gap-2">
-                                                                                        <span className={`text-sm font-medium truncate ${isActive ? 'text-discord-blurple' : 'text-discord-text'}`}>{track.title}</span>
+                                                                                        <span className={`text-sm font-medium truncate ${isActive ? 'text-discord-blurple' : 'text-discord-text'}`}>
+                                                                                             {track.title ? track.title.replace(/\[.*?(official|music|video|audio|lyric|live|remaster).*?\]|\(.*?(official|music|video|audio|lyric|live|remaster).*?\)/gi, '').trim() : 'Unknown Title'}
+                                                                                        </span>
                                                                                         {currentlyEnriching === track.id ? (
                                                                                             <i className="fa-solid fa-wand-magic-sparkles text-[10px] text-discord-blurple animate-pulse"></i>
                                                                                         ) : enrichmentQueue.includes(track.id) ? (
                                                                                             <i className="fa-solid fa-hourglass-half text-[10px] text-yellow-500/50"></i>
                                                                                         ) : (
-                                                                                            <i className="fa-solid fa-circle-check text-[10px] text-green-500/30"></i>
+                                                                                            <i className="fa-solid fa-circle-check text-[10px] text-green-500/30 text-opacity-80"></i>
                                                                                         )}
                                                                                     </div>
                                                                                     <span className="text-[11px] text-discord-muted truncate">{track.artist}</span>
                                                                                 </div>
                                                                             </div>
 
-                                                                            <div className="px-4 hidden md:block text-xs text-discord-muted truncate">{track.album}</div>
+                                                                            <div className="px-4 hidden md:block text-xs text-discord-muted truncate">
+                                                                                {track.album && track.album !== 'Unknown Album' && track.album !== 'Descargas de YT' ? track.album : '-'}
+                                                                            </div>
 
                                                                             <div className="px-4 flex items-center justify-end gap-3">
                                                                                 <button
@@ -2362,6 +2545,104 @@
                                                 </div>
                                             )
                                         }
+
+                                        {view === 'ai-assistant' && (
+                                            <div className="flex flex-col h-[calc(100vh-140px)] w-full max-w-4xl mx-auto rounded-2xl overflow-hidden glass-panel border border-white/10 shadow-2xl relative">
+                                                {/* Encabezado IA */}
+                                                <div className="bg-gradient-to-r from-purple-600/30 to-pink-600/30 backdrop-blur-md p-4 flex items-center gap-4 border-b border-white/10 z-10 shrink-0">
+                                                    <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-purple-500 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-purple-500/30">
+                                                        <i className="fa-solid fa-brain"></i>
+                                                    </div>
+                                                    <div>
+                                                        <h2 className="text-lg font-bold text-white tracking-tight">Chakras Guru</h2>
+                                                        <p className="text-xs text-purple-200/70 font-medium tracking-wide">AI Music Assistant • Local Offline Mode</p>
+                                                    </div>
+                                                </div>
+
+                                                {/* Área de Mensajes */}
+                                                <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent flex flex-col gap-6" style={{ scrollBehavior: 'smooth' }}>
+                                                    {aiMessages.map((msg, idx) => (
+                                                        <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                                            
+                                                            {/* Avatar IA */}
+                                                            {msg.role === 'ai' && (
+                                                                <div className="w-8 h-8 rounded-full bg-discord-tertiary flex items-center justify-center text-purple-400 mr-3 shrink-0 self-end mb-1 border border-white/5">
+                                                                    <i className="fa-solid fa-robot text-xs"></i>
+                                                                </div>
+                                                            )}
+
+                                                            <div className={`max-w-[75%] flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                                                                
+                                                                {/* Burbuja de Texto */}
+                                                                <div className={`px-5 py-3 rounded-2xl shadow-sm text-[15px] leading-relaxed relative ${msg.role === 'user' 
+                                                                    ? 'bg-discord-blurple text-white rounded-br-sm' 
+                                                                    : 'bg-discord-secondary/80 text-discord-text rounded-bl-sm border border-white/5'
+                                                                }`}>
+                                                                    {msg.text}
+                                                                </div>
+
+                                                                {/* Tarjeta de Playlist Interactiva (Si la IA retornó datos) */}
+                                                                {msg.role === 'ai' && msg.playlist && msg.playlist.length > 0 && (
+                                                                    <div className="bg-discord-tertiary/60 border border-purple-500/20 p-4 rounded-xl w-72 shadow-xl backdrop-blur mt-1 group hover:border-purple-500/40 transition-colors">
+                                                                        <div className="flex items-center gap-3 mb-3">
+                                                                            <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-blue-500 rounded flex items-center justify-center shadow-md">
+                                                                                <i className="fa-solid fa-compact-disc text-white opacity-80 text-xl group-hover:animate-spin"></i>
+                                                                            </div>
+                                                                            <div className="min-w-0">
+                                                                                <p className="text-sm font-bold text-white truncate">{msg.playlistName || "AI Mix"}</p>
+                                                                                <p className="text-xs text-discord-muted truncate">{msg.playlist.length} canciones geniales</p>
+                                                                            </div>
+                                                                        </div>
+                                                                        <button 
+                                                                            onClick={() => playAiPlaylist(msg.playlist)}
+                                                                            className="w-full bg-discord-blurple hover:bg-[#4752C4] text-white py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-transform active:scale-95"
+                                                                        >
+                                                                            <i className="fa-solid fa-play"></i> Reproducir Mix
+                                                                        </button>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+
+                                                    {/* Indicador de "Escribiendo..." */}
+                                                    {isAiThinking && (
+                                                        <div className="flex justify-start">
+                                                            <div className="w-8 h-8 rounded-full bg-discord-tertiary flex items-center justify-center text-purple-400 mr-3 shrink-0 self-end mb-1">
+                                                                <i className="fa-solid fa-robot text-xs"></i>
+                                                            </div>
+                                                            <div className="bg-discord-secondary/80 px-5 py-3 rounded-2xl rounded-bl-sm w-fit border border-white/5 flex gap-1.5 items-center h-12">
+                                                                <div className="w-2 h-2 bg-discord-muted rounded-full animate-bounce"></div>
+                                                                <div className="w-2 h-2 bg-discord-muted rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                                                                <div className="w-2 h-2 bg-discord-muted rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    <div ref={chatEndRef} />
+                                                </div>
+
+                                                {/* Input de Chat */}
+                                                <div className="p-4 bg-discord-secondary/50 backdrop-blur-md border-t border-white/5 shrink-0">
+                                                    <form onSubmit={handleAiSubmit} className="relative flex items-center">
+                                                        <input
+                                                            type="text"
+                                                            value={aiInput}
+                                                            onChange={(e) => setAiInput(e.target.value)}
+                                                            placeholder="Pide una vibra, estilo, o diles que te sorprenda..."
+                                                            className="w-full bg-discord-tertiary/80 text-discord-text rounded-full py-3.5 pl-6 pr-14 outline-none border border-transparent focus:border-purple-500/50 focus:bg-discord-tertiary transition-all placeholder-discord-muted font-medium text-[15px]"
+                                                            disabled={isAiThinking}
+                                                        />
+                                                        <button 
+                                                            type="submit" 
+                                                            disabled={!aiInput.trim() || isAiThinking}
+                                                            className="absolute right-2 w-10 h-10 bg-discord-blurple hover:bg-[#4752C4] disabled:opacity-50 disabled:bg-discord-tertiary disabled:text-discord-muted text-white rounded-full flex items-center justify-center transition-all disabled:cursor-not-allowed"
+                                                        >
+                                                            <i className="fa-solid fa-paper-plane mr-0.5 mt-0.5"></i>
+                                                        </button>
+                                                    </form>
+                                                </div>
+                                            </div>
+                                        )}
 
                                         {view === 'analytics' && <AnalyticsDashboard library={library} />}
 

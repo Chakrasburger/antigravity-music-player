@@ -275,7 +275,7 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
             
             with yt_dlp.YoutubeDL(ydl_opts_search) as ydl:
                 try:
-                    result = ydl.extract_info(f"ytsearch5:{query}", download=False)
+                    result = ydl.extract_info(f"ytsearch25:{query}", download=False)
                     entries = result.get('entries', [])
                     
                     resultados = []
@@ -348,6 +348,123 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_response(500)
                 self.end_headers()
 
+        # Endpoint: AI Assistant (Chakras Guru)
+        elif path == '/api/ai-chat':
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            
+            try:
+                data = json.loads(post_data.decode('utf-8'))
+                query = data.get('query', '').lower()
+                library = data.get('library', [])
+                
+                print(f"API: AI Chat Recibido -> '{query}' (Analizando {len(library)} canciones)")
+                
+                # --- HEURÍSTICA OFFLINE (NLP Básico) ---
+                response_text = "No entendí muy bien. Intenta pedirme algo como 'Música para relajarme' o 'Dame rock intenso'."
+                playlist = []
+                playlist_name = "Playlist de AI"
+                
+                # 1. Definir Diccionarios de Ánimo/Frecuencia
+                moods = {
+                    "relax": {"keywords": ["relajar", "dormir", "calma", "chill", "tranquilo", "sad", "triste", "estudiar", "432hz"], "genres": ["ambient", "lo-fi", "lofi", "chill", "classical", "jazz", "acoustic"]},
+                    "energy": {"keywords": ["entrenar", "gym", "correr", "fiesta", "feliz", "alegre", "euforia", "energia", "528hz"], "genres": ["rock", "pop", "metal", "electronic", "dance", "edm", "hip hop", "trap"]},
+                    "focus": {"keywords": ["trabajar", "programar", "foco", "concentrar", "leer", "estudiar"], "genres": ["synthwave", "instrumental", "soundtrack", "ambient", "electronic", "lofi"]},
+                    "love": {"keywords": ["romantico", "amor", "pareja", "cita", "love"], "genres": ["r&b", "pop", "bolero", "acoustic", "soul"]}
+                }
+                
+                # 2. Detectar Intención Primaria
+                matched_mood = None
+                for mood, config in moods.items():
+                    if any(kw in query for kw in config["keywords"]):
+                        matched_mood = mood
+                        break
+                        
+                # 3. Filtrar Librería basada en Intención + Rating
+                if library:
+                    if matched_mood == "relax":
+                        response_text = "He preparado una mezcla muy tranquila para bajar las revoluciones y fluir. ¡Ideal para relajarte!"
+                        playlist_name = "Chakras Guru: Relax & Chill"
+                        target_genres = moods["relax"]["genres"]
+                    elif matched_mood == "energy":
+                        response_text = "¡Vamos arriba! Seleccioné frecuencias altas y ritmos potentes para llenarte de energía. ¡A romperla!"
+                        playlist_name = "Chakras Guru: High Energy"
+                        target_genres = moods["energy"]["genres"]
+                    elif matched_mood == "focus":
+                        response_text = "Modo concentración activado. Aquí tienes frecuencias continuas para mantenerte inmerso en tu zona."
+                        playlist_name = "Chakras Guru: Deep Focus"
+                        target_genres = moods["focus"]["genres"]
+                    elif matched_mood == "love":
+                        response_text = "El amor está en el aire. Dejé listas las pistas más románticas de tu colección."
+                        playlist_name = "Chakras Guru: Romantic Vibes"
+                        target_genres = moods["love"]["genres"]
+                    elif "favorit" in query or "gusta" in query or "corazon" in query:
+                        response_text = "Entendido. Aquí tienes lo mejor de lo mejor, tus pistas marcadas como favoritas (♥)."
+                        playlist_name = "Chakras Guru: Tus Favoritos"
+                        # Filtro especial por rating
+                        playlist = [t for t in library if t.get('rating', 0) == 1]
+                        target_genres = [] # Evitar el filtro general
+                        matched_mood = "favorites"
+                    elif "sorprende" in query or "aleatorio" in query or "random" in query or "cualquier" in query:
+                        response_text = "Voy a sacar algunas joyas al azar de tu bóveda musical. ¡Déjate sorprender!"
+                        playlist_name = "Chakras Guru: Sorpresa"
+                        import random
+                        playlist = random.sample(library, min(20, len(library)))
+                        target_genres = []
+                        matched_mood = "random"
+                    
+                    # Filtro General si hubo match de ánimos (y no fue "favoritos" ni "random")
+                    if matched_mood and matched_mood not in ["favorites", "random"]:
+                        for track in library:
+                            genre = str(track.get('genre', '')).lower()
+                            title = str(track.get('title', '')).lower()
+                            artist = str(track.get('artist', '')).lower()
+                            
+                            is_match = False
+                            # Match por Género explícito
+                            if any(g in genre for g in target_genres):
+                                is_match = True
+                            # Heurística: Si no hay género, buscar palabras clave en el título/artista
+                            elif any(kw in title for kw in moods[matched_mood]["keywords"]):
+                                is_match = True
+                                
+                            # Boost si tiene "rating" y cuadra con el género
+                            if is_match:
+                                playlist.append(track)
+                        
+                        # Limitar a máximo 30 pistas y ordenarlas un poco por rating
+                        playlist = sorted(playlist, key=lambda x: x.get('rating', 0), reverse=True)[:30]
+                        
+                        # Fallback si el filtro fue muy estricto y no encontró nada
+                        if not playlist:
+                            import random
+                            response_text = f"Sabes, no encontré exactamente ese estilo en tu librería actual, pero te preparé algo genial de todos modos."
+                            playlist = random.sample(library, min(15, len(library)))
+                
+                else:
+                    response_text = "Aún no tienes canciones en tu librería local. Intenta agregar una carpeta primero o busca música en la pestaña de YouTube."
+                
+                # Armar el JSON puro para React
+                reply_payload = {
+                    'status': 'success',
+                    'reply': response_text,
+                    'playlist': playlist,  # Array completo de objetos Track pasados desde JS
+                    'playlistName': playlist_name
+                }
+                
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps(reply_payload).encode('utf-8'))
+                
+            except Exception as e:
+                print(f"Error procesando AI Chat: {e}")
+                self.send_response(500)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode())
+        
         # Endpoint: Descarga de YouTube
         elif path == '/api/download':
             content_length = int(self.headers['Content-Length'])
@@ -384,14 +501,9 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
                     download_progress[video_id] = "100.0"
 
             ydl_opts_dl = {
-                'format': 'bestaudio/best',
+                'format': 'bestaudio[ext=m4a]/bestaudio/best',
                 'outtmpl': f'{ruta_base}.%(ext)s',
                 'noplaylist': True,
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
                 'progress_hooks': [dl_hook],
                 'quiet': True,
                 'no_warnings': True
@@ -400,9 +512,10 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 import yt_dlp  # Lazy load to save startup RAM
                 with yt_dlp.YoutubeDL(ydl_opts_dl) as ydl:
-                    ydl.download([url])
+                    info = ydl.extract_info(url, download=True)
+                    ext = info.get('ext', 'm4a')
                 
-                nombre_archivo_final = f"{nombre_base}.mp3"
+                nombre_archivo_final = f"{nombre_base}.{ext}"
                 ruta_relativa = f"descarga_canciones/music/{nombre_archivo_final}"
                 
                 # Actualizar Database Historico
@@ -414,9 +527,13 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
                         except json.JSONDecodeError:
                             catalogo = []
                             
+                import re
+                titulo_limpio = re.sub(r'(?i)[\[\(].*?(official|music|video|audio|lyric|live|remaster).*?[\]\)]', '', titulo_cancion).strip()
+
                 catalogo.append({
-                    "title": titulo_cancion,
+                    "title": titulo_limpio,
                     "artist": artista,
+                    "album": "Descargas de YT",
                     "genre": "Descargado"
                 })
                 with open(ARCHIVO_ENTRADA, "w", encoding="utf-8") as f:
@@ -437,17 +554,26 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
                     
                 # Use mutagen to extract exact duration after downloading
                 duration = 0
+                has_mutagen = False
                 try:
-                    from mutagen.mp3 import MP3
-                    audio = MP3(os.path.join(CARPETA_MUSICA, nombre_archivo_final))
-                    duration = audio.info.length
-                except Exception as e:
-                    print(f"No se pudo extraer duracion: {e}")
+                    from mutagen import File as MutagenFile
+                    has_mutagen = True
+                except ImportError:
+                    pass
+
+                if has_mutagen:
+                    try:
+                        audio = MutagenFile(os.path.join(CARPETA_MUSICA, nombre_archivo_final))
+                        if audio is not None and hasattr(audio, 'info') and audio.info:
+                            duration = audio.info.length
+                    except Exception as e:
+                        print(f"No se pudo extraer duracion: {e}")
 
                 nuevo_track = {
                     "id": next_id,
-                    "title": titulo_cancion,
+                    "title": titulo_limpio,
                     "artist": artista,
+                    "album": "Descargas de YT",
                     "filePath": ruta_relativa,
                     "duration": duration,
                     "search_tags": f"{titulo_cancion.lower()} {artista.lower()} descargado",
@@ -467,7 +593,9 @@ class AntiGravityAPIHandler(http.server.SimpleHTTPRequestHandler):
                 
             except Exception as e:
                 self.send_response(500)
+                self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode())
                 print(f"Error en descarga: {e}")
 
         # Endpoint: Editar metadatos de un MP3

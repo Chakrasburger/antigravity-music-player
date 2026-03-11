@@ -134,22 +134,91 @@ class Api:
         safe_print(f"[Scan] Starting: {folder_path}")
         tracks = []
         extensions = ('.mp3', '.flac', '.wav', '.ogg', '.webm', '.mp4', '.m4a')
+        
+        has_mutagen = False
+        try:
+            from mutagen import File as MutagenFile
+            import base64
+            has_mutagen = True
+        except ImportError:
+            safe_print("⚠ Mutagen no disponible. Usando datos básicos del nombre de archivo.")
+
         try:
             for root, dirs, files in os.walk(folder_path):
                 for file in files:
                     if file.lower().endswith(extensions):
                         full_path = os.path.join(root, file)
                         track_id = hashlib.md5(full_path.encode('utf-8')).hexdigest()[:12]
-                        tracks.append({
+                        base_name = os.path.splitext(file)[0]
+                        
+                        artist = 'Unknown Artist'
+                        title = base_name
+                        if " - " in base_name:
+                            parts = base_name.split(" - ", 1)
+                            artist = parts[0].strip()
+                            title = parts[1].strip()
+
+                        track_data = {
                             'id': track_id,
                             'fileName': file,
                             'filePath': full_path,
-                            'title': os.path.splitext(file)[0],
-                            'artist': 'Unknown Artist',
+                            'title': title,
+                            'artist': artist,
                             'album': 'Unknown Album',
+                            'coverUrl': None,
                             'duration': 0,
-                            'genre': 'Unknown'
-                        })
+                            'releaseYear': None,
+                            'genre': None
+                        }
+
+                        if has_mutagen:
+                            try:
+                                audio = MutagenFile(full_path)
+                                if audio is not None:
+                                    if hasattr(audio, 'info') and audio.info:
+                                        track_data["duration"] = audio.info.length
+                                    elif full_path.lower().endswith('.wav'):
+                                        import wave
+                                        with wave.open(full_path, 'r') as wav:
+                                            frames = wav.getnframes()
+                                            rate = wav.getframerate()
+                                            track_data["duration"] = frames / float(rate)
+                                    elif full_path.lower().endswith('.mp3'):
+                                        from mutagen.mp3 import MP3
+                                        audio_mp3 = MP3(full_path)
+                                        track_data["duration"] = audio_mp3.info.length
+                                
+                                if audio and audio.tags:
+                                    tags = audio.tags
+                                    # MP3 ID3
+                                    if 'TIT2' in tags: track_data["title"] = str(tags['TIT2'])
+                                    if 'TPE1' in tags: track_data["artist"] = str(tags['TPE1'])
+                                    if 'TALB' in tags: track_data["album"] = str(tags['TALB'])
+                                    if 'TDRC' in tags: track_data["releaseYear"] = str(tags['TDRC'])
+                                    if 'TCON' in tags: track_data["genre"] = str(tags['TCON'])
+                                    
+                                    # Vorbis/FLAC tags
+                                    if 'title' in tags: track_data["title"] = str(tags['title'][0])
+                                    if 'artist' in tags: track_data["artist"] = str(tags['artist'][0])
+                                    if 'album' in tags: track_data["album"] = str(tags['album'][0])
+                                    if 'date' in tags: track_data["releaseYear"] = str(tags['date'][0])
+                                    if 'genre' in tags: track_data["genre"] = str(tags['genre'][0])
+
+                                    # Try to extract cover
+                                    if hasattr(audio, 'pictures') and audio.pictures:
+                                        pic = audio.pictures[0]
+                                        track_data["coverUrl"] = f"data:{pic.mime};base64,{base64.b64encode(pic.data).decode('utf-8')}"
+                                    else:
+                                        # Look for APIC in ID3
+                                        for key in tags.keys():
+                                            if key.startswith('APIC'):
+                                                apic = tags[key]
+                                                track_data["coverUrl"] = f"data:{apic.mime};base64,{base64.b64encode(apic.data).decode('utf-8')}"
+                                                break
+                            except Exception as e:
+                                safe_print(f"Error parseando metadatos para {file}: {e}")
+                        
+                        tracks.append(track_data)
             safe_print(f"[Scan] Success: {len(tracks)} files")
             return {'status': 'success', 'tracks': tracks}
         except Exception as e:
@@ -236,7 +305,7 @@ def main():
         safe_print(f"[Main] ERROR: No se encontró index.html en {index_path}")
     
     window = webview.create_window(
-        title='AntiGravity Music Player', 
+        title='ChakrasPlayer', 
         url=index_path,
         width=1320, 
         height=840,
