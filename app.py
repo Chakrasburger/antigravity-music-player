@@ -6,21 +6,27 @@ import hashlib
 import base64
 import threading
 import socketserver
+import time
 
-# Configuración del entorno PyInstaller
+# ConfiguraciÃ³n del entorno PyInstaller
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
     if sys._MEIPASS not in sys.path:
         sys.path.append(sys._MEIPASS)
 
-# Configuración del servidor
+# ConfiguraciÃ³n del servidor
 host = "127.0.0.1"
 PORT = 5888
 
-# Importación del handler del servidor
+# ImportaciÃ³n del handler del servidor
 try:
-    from server import AntiGravityAPIHandler
-except ImportError:
-    AntiGravityAPIHandler = None
+    from server import ChakrasPlayerAPIHandler, sync_library
+except Exception as e:
+    ChakrasPlayerAPIHandler = None
+    sync_library = None
+    # We don't have safe_print yet, so we'll log this later in main
+    _startup_error = e
+else:
+    _startup_error = None
 
 def get_base_path():
     """Returns the base directory for persistent data (where the .exe is)."""
@@ -35,15 +41,18 @@ def get_resource_path(relative_path):
     return os.path.join(os.path.abspath("."), relative_path)
 
 def safe_print(msg):
-    """Prints to stdout with fallbacks for Unicode characters on Windows console."""
+    """Prints to stdout and a log file."""
+    log_msg = f"[{time.ctime()}] {msg}"
     try:
-        print(msg)
-    except UnicodeEncodeError:
-        try:
-            # Fallback for Windows consoles that don't support UTF-8
-            print(msg.encode('ascii', 'replace').decode('ascii'))
-        except:
-            pass
+        print(log_msg)
+    except:
+        pass
+    try:
+        log_path = os.path.join(get_base_path(), "debug.log")
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(log_msg + "\n")
+    except:
+        pass
 
 class Api:
     def __init__(self):
@@ -141,7 +150,7 @@ class Api:
             import base64
             has_mutagen = True
         except ImportError:
-            safe_print("⚠ Mutagen no disponible. Usando datos básicos del nombre de archivo.")
+            safe_print("âš  Mutagen no disponible. Usando datos bÃ¡sicos del nombre de archivo.")
 
         try:
             for root, dirs, files in os.walk(folder_path):
@@ -205,16 +214,21 @@ class Api:
                                     if 'genre' in tags: track_data["genre"] = str(tags['genre'][0])
 
                                     # Try to extract cover
+                                    has_cover = False
                                     if hasattr(audio, 'pictures') and audio.pictures:
-                                        pic = audio.pictures[0]
-                                        track_data["coverUrl"] = f"data:{pic.mime};base64,{base64.b64encode(pic.data).decode('utf-8')}"
+                                        has_cover = True
                                     else:
                                         # Look for APIC in ID3
                                         for key in tags.keys():
                                             if key.startswith('APIC'):
-                                                apic = tags[key]
-                                                track_data["coverUrl"] = f"data:{apic.mime};base64,{base64.b64encode(apic.data).decode('utf-8')}"
+                                                has_cover = True
                                                 break
+                                    
+                                    if has_cover:
+                                        import urllib.parse
+                                        # Use the local server URL (Port 5888)
+                                        # Since this is the bridge, we provide the full localhost URL
+                                        track_data["coverUrl"] = f"http://127.0.0.1:5888/api/cover?path={urllib.parse.quote(full_path)}&s=400"
                             except Exception as e:
                                 safe_print(f"Error parseando metadatos para {file}: {e}")
                         
@@ -229,6 +243,64 @@ class Api:
         """Stub for metadata editing via bridge - avoids 405 error."""
         safe_print(f"[Bridge] Metadata Update requested: {data.get('id')}")
         return {'status': 'success', 'message': 'Metadata update received by bridge (Native)'}
+
+    def extract_batch_metadata(self, file_content_b64):
+        """Extracts track names/artist metadata from a base64 encoded file (.txt or .json)."""
+        safe_print("[Bridge] Extracting batch metadata...")
+        try:
+            # Decode content
+            content = base64.b64decode(file_content_b64).decode('utf-8')
+            
+            # Identify if it is JSON or TXT
+            songs_to_download = []
+            
+            if content.strip().startswith('[') or content.strip().startswith('{'):
+                try:
+                    import json
+                    data = json.loads(content)
+                    if isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, dict):
+                                artist = item.get('artist', 'Unknown Artist')
+                                title = item.get('title', item.get('name', 'Unknown Title'))
+                                songs_to_download.append({'artist': artist, 'title': title})
+                    elif isinstance(data, dict):
+                        # Maybe a single track or a playlist object
+                        tracks = data.get('tracks', [])
+                        for item in tracks:
+                            artist = item.get('artist', 'Unknown Artist')
+                            title = item.get('title', item.get('name', 'Unknown Title'))
+                            songs_to_download.append({'artist': artist, 'title': title})
+                except:
+                    pass
+            
+            # If nothing found or not JSON, parse as TXT (one per line)
+            if not songs_to_download:
+                lines = content.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if not line: continue
+                    
+                    artist = "Unknown Artist"
+                    title = line
+                    
+                    if " - " in line:
+                        parts = line.split(" - ", 1)
+                        artist = parts[0].strip()
+                        title = parts[1].strip()
+                    elif "-" in line:
+                        parts = line.split("-", 1)
+                        artist = parts[0].strip()
+                        title = parts[1].strip()
+                    
+                    songs_to_download.append({'artist': artist, 'title': title})
+            
+            safe_print(f"[Bridge] Found {len(songs_to_download)} songs in batch.")
+            return {'status': 'success', 'songs': songs_to_download}
+            
+        except Exception as e:
+            safe_print(f"[Bridge] Batch extraction error: {e}")
+            return {'status': 'error', 'message': str(e)}
 
     def safe_rename_file(self, old_path, suggested_name):
         """Physically renames a file to a safe ASCII-ish name."""
@@ -281,20 +353,30 @@ def main():
     application_path = get_base_path()
     os.chdir(application_path)
 
+    if _startup_error:
+        safe_print(f"[Main] FATAL STARTUP ERROR: {_startup_error}")
+    
     api = Api()
     
     # Iniciar servidor de backend en un hilo separado
     def run_server():
-        if AntiGravityAPIHandler is None:
-            safe_print("[Backend] ERROR: No se pudo cargar AntiGravityAPIHandler. El streaming de audio no funcionará.")
+        if sync_library:
+            try:
+                safe_print("[Backend] Sincronizando biblioteca...")
+                sync_library()
+            except Exception as e:
+                safe_print(f"[Backend] Error en sync_library: {e}")
+
+        if ChakrasPlayerAPIHandler is None:
+            safe_print("[Backend] ERROR: No se pudo cargar ChakrasPlayerAPIHandler. El streaming de audio no aparecerÃ¡.")
             return
         try:
-            socketserver.TCPServer.allow_reuse_address = True
-            with socketserver.TCPServer((host, PORT), AntiGravityAPIHandler) as httpd:
+            socketserver.ThreadingTCPServer.allow_reuse_address = True
+            with socketserver.ThreadingTCPServer((host, PORT), ChakrasPlayerAPIHandler) as httpd:
                 safe_print(f"[Backend] Servidor iniciado en http://{host}:{PORT}")
                 httpd.serve_forever()
         except Exception as e:
-            safe_print(f"[Backend] Error: {e}")
+            safe_print(f"[Backend] CRITICAL ERROR: {e}")
 
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
@@ -302,7 +384,7 @@ def main():
     index_path = get_resource_path('index.html')
     safe_print(f"[Main] Buscando index.html en: {index_path}")
     if not os.path.exists(index_path):
-        safe_print(f"[Main] ERROR: No se encontró index.html en {index_path}")
+        safe_print(f"[Main] ERROR: No se encontrÃ³ index.html en {index_path}")
     
     window = webview.create_window(
         title='ChakrasPlayer', 
@@ -314,7 +396,7 @@ def main():
         js_api=api
     )
     
-    webview.start(debug=True)
+    webview.start(debug=False)
 
 if __name__ == '__main__':
     main()

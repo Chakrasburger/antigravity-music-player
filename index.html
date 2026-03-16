@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Anti Gravity - Offline Local Player</title>
+    <title>ChakrasPlayer - Offline Local Player</title>
 
     <!-- Bibliotecas Locales (Modo Offline y Seguro) -->
     <script src="assets/lib/react.min.js"></script>
@@ -126,7 +126,7 @@
         }
 
         [data-theme='dark'] {
-            --color-bg: #36393F;
+            --color-bg: #18191C;
             --color-secondary: #2F3136;
             --color-tertiary: #202225;
             --color-blurple: #5865F2;
@@ -204,7 +204,7 @@
 
         /* Dynamic Liquid Lyrics Classes */
         .active-lyric-line {
-            background: linear-gradient(to right, var(--color-blurple) var(--karaoke-fill, 0%), rgba(255, 255, 255, 0.4) var(--karaoke-fill, 0%));
+            background: linear-gradient(to right, var(--color-blurple) var(--karaoke-fill, 0%), color-mix(in srgb, var(--color-text) 30%, transparent) var(--karaoke-fill, 0%));
             -webkit-background-clip: text;
             background-clip: text;
             -webkit-text-fill-color: transparent;
@@ -219,14 +219,14 @@
         .inactive-lyric-line {
             font-size: clamp(1.2rem, 3vw, 1.8rem);
             opacity: 0.4;
-            color: white;
+            color: var(--color-text);
             transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1);
         }
 
         .inactive-lyric-line:hover {
             opacity: 0.8;
             filter: blur(0px);
-            color: white;
+            color: var(--color-text);
         }
 
         ::-webkit-scrollbar-track {
@@ -468,7 +468,7 @@
     <!-- Dexie.js Setup -->
     <script>
             // --- Storage Layer ---
-            const db = new Dexie('AntiGravityOfflineDB');
+            const db = new Dexie('Chakras IAOfflineDB');
             db.version(1).stores({
                 tracks: 'id',
                 settings: 'key',
@@ -509,6 +509,9 @@
                 },
                 async saveTracks(tracks) {
                     await db.tracks.bulkPut(tracks);
+                },
+                async saveTrack(track) {
+                    await db.tracks.put(track);
                 },
                 async getAllTracks() {
                     return await db.tracks.toArray();
@@ -582,20 +585,13 @@
 
                     window.jsmediatags.read(file, {
                         onSuccess: (tag) => {
-                            let coverUrl = null;
-                            if (tag.tags.picture) {
-                                let base64String = "";
-                                const data = tag.tags.picture.data;
-                                for (let i = 0; i < data.length; i++) {
-                                    base64String += String.fromCharCode(data[i]);
-                                }
-                                coverUrl = "data:" + tag.tags.picture.format + ";base64," + window.btoa(base64String);
-                            }
+                            // Memory Optimization: We no longer generate massive base64 strings in the frontend.
+                            // The backend covers this via /api/cover.
                             resolve({
                                 title: tag.tags.title || fallbackTitle,
                                 artist: tag.tags.artist || fallbackArtist,
                                 album: tag.tags.album || "Unknown Album",
-                                coverUrl: coverUrl
+                                coverUrl: null // Server will provide this via scan
                             });
                         },
                         onError: () => {
@@ -659,6 +655,8 @@
                 const [editorMsg, setEditorMsg] = useState('');
                 const [trimPreviewPlaying, setTrimPreviewPlaying] = useState(false);
                 const trimPreviewRef = useRef(new Audio());
+                const [isMuted, setIsMuted] = useState(false);
+                const [prevVolume, setPrevVolume] = useState(1);
                 const [isServerConnected, setIsServerConnected] = useState(true);
 
                 // --- Robust Audio Engine (MediaElement-based) ---
@@ -676,7 +674,6 @@
                     // Silently log to browser console only
                     if (type === 'error') console.error('[AG]', msg);
                     else if (type === 'warn') console.warn('[AG]', msg);
-                    else console.log('[AG]', msg);
                 }, []);
 
 
@@ -716,7 +713,7 @@
                     setEditorMsg('Cargando pista...');
 
                     const filePath = track.filePath || track.file_path || track.fileName;
-                    const audioUrl = `/api/file?path=${encodeURIComponent(filePath)}`;
+                    const audioUrl = `http://127.0.0.1:5888/api/file?path=${encodeURIComponent(filePath)}`;
 
                     const tempAudio = new Audio(audioUrl);
                     tempAudio.onloadedmetadata = () => {
@@ -757,21 +754,171 @@
                                     : t
                             ));
                             await window.StorageApi.updateTrack(editMetaModal.track.id, { title: updatedMeta.title, artist: updatedMeta.artist, album: updatedMeta.album, releaseYear: updatedMeta.year, genre: updatedMeta.genre });
-                            setEditorMsg('✅ Guardado con éxito');
+                            setEditorMsg('âœ… Guardado con éxito');
                             setTimeout(() => setEditMetaModal(null), 1200);
                         } else {
-                            setEditorMsg(`❌ Error: ${data.message}`);
+                            setEditorMsg(`âŒ Error: ${data.message}`);
                         }
                     } catch (e) {
-                        setEditorMsg('❌ Error: Asegúrate de que el servidor Python está corriendo.');
+                        setEditorMsg('âŒ Error: Asegúrate de que el servidor Python está corriendo.');
                     } finally {
                         setEditorSaving(false);
                     }
                 };
 
                 const trimAudio = async () => {
-                    console.log('Trim Audio is disabled in Pure Native mode.');
+                    if (!trimModal || editorSaving) return;
+                    setEditorSaving(true);
+                    setTrimPreviewPlaying(false);
+                    setEditorMsg('Procesando recorte...');
+                    
+                    try {
+                        const filePath = trimModal.track.filePath || trimModal.track.file_path || trimModal.track.fileName;
+                        const res = await fetch('http://127.0.0.1:5888/api/trim', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                path: filePath,
+                                start: trimRange.start,
+                                end: trimRange.end
+                            })
+                        });
+                        
+                        const data = await res.json();
+                        if (data.status === 'success') {
+                            setEditorMsg('✅ ¡Recortado con éxito!');
+                            
+                            // Actualizar duración en la librería
+                            const newDuration = data.newDuration;
+                            const updateLibrary = (prev) => prev.map(t => 
+                                (t.id === trimModal.track.id) ? { ...t, duration: newDuration } : t
+                            );
+                            
+                            setLibrary(updateLibrary);
+                            setPlaybackQueue(updateLibrary);
+                            setOriginalQueue(updateLibrary);
+                            
+                            await window.StorageApi.updateTrack(trimModal.track.id, { duration: newDuration });
+                            
+                            setTimeout(() => setTrimModal(null), 1500);
+                        } else {
+                            setEditorMsg(`❌ Error: ${data.message}`);
+                        }
+                    } catch (e) {
+                        setEditorMsg('❌ Error al conectar con el servidor.');
+                    } finally {
+                        setEditorSaving(false);
+                    }
                 };
+
+                const deleteSong = async (track) => {
+                    const confirmMsg = `¿Estás seguro de que quieres borrar "${track.title}"?\n\nEsta acción eliminará el archivo físico permanentemente.`;
+                    if (!confirm(confirmMsg)) return;
+
+                    try {
+                        const res = await fetch('http://127.0.0.1:5888/api/delete-song', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ path: track.filePath || track.fileName })
+                        });
+                        const data = await res.json();
+                        if (data.status === 'success') {
+                            // Sync state
+                            setLibrary(prev => prev.filter(t => t.id !== track.id));
+                            setPlaybackQueue(prev => prev.filter(t => t.id !== track.id));
+                            setOriginalQueue(prev => prev.filter(t => t.id !== track.id));
+                            await window.StorageApi.deleteTrack(track.id);
+                            closeContextMenu();
+                        } else {
+                            alert(`Error al borrar: ${data.message}`);
+                        }
+                    } catch (e) {
+                        console.error("Delete error:", e);
+                        alert("Error de conexión con el servidor.");
+                    }
+                };
+
+                const clearLibrary = async () => {
+                    const confirmMsg = "¡ADVERTENCIA CRÍTICA!\n\n¿Estás seguro de que quieres BORRAR TODA LA BIBLIOTECA?\n\nEsto eliminará físicamente TODOS los archivos de música en la carpeta actual y limpiará la base de datos. Esta acción no se puede deshacer.";
+                    if (!confirm(confirmMsg)) return;
+
+                    try {
+                        const res = await fetch('http://127.0.0.1:5888/api/clear-library', { method: 'POST' });
+                        const data = await res.json();
+                        if (data.status === 'success') {
+                            setLibrary([]);
+                            setPlaybackQueue([]);
+                            setOriginalQueue([]);
+                            await window.StorageApi.clearTracks();
+                            alert("Biblioteca purgada con éxito.");
+                        } else {
+                            alert(`Error: ${data.message}`);
+                        }
+                    } catch (e) {
+                        alert("Error de conexión.");
+                    }
+                };
+
+                const replaceFromYoutube = (track) => {
+                    setYtSearchQuery(`${track.artist} - ${track.title}`);
+                    setView('searchYt');
+                    closeContextMenu();
+                };
+
+                // Preview Loop Logic
+                useEffect(() => {
+                    const audio = trimPreviewRef.current;
+                    let interval;
+                    
+                    if (trimPreviewPlaying && audio.src) {
+                        audio.currentTime = trimRange.start;
+                        audio.play().catch(e => console.warn("Trim preview play error:", e));
+                        
+                        interval = setInterval(() => {
+                            if (audio.currentTime >= trimRange.end) {
+                                audio.currentTime = trimRange.start;
+                            }
+                        }, 100);
+                    } else {
+                        audio.pause();
+                    }
+                    
+                    return () => {
+                        audio.pause();
+                        if (interval) clearInterval(interval);
+                    };
+                }, [trimPreviewPlaying, trimRange.start, trimRange.end]);
+
+                // Media Session API (Spotify behavior)
+                useEffect(() => {
+                    if ('mediaSession' in navigator && activeTrack) {
+                        navigator.mediaSession.metadata = new MediaMetadata({
+                            title: activeTrack.title,
+                            artist: activeTrack.artist,
+                            album: activeTrack.album || 'ChakrasPlayer',
+                            artwork: [
+                                { src: activeTrack.coverUrl || 'favicon.ico', sizes: '512x512', type: 'image/png' }
+                            ]
+                        });
+
+                        navigator.mediaSession.setActionHandler('play', () => togglePlay());
+                        navigator.mediaSession.setActionHandler('pause', () => togglePlay());
+                        navigator.mediaSession.setActionHandler('previoustrack', () => prevTrack());
+                        navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack());
+                        navigator.mediaSession.setActionHandler('seekto', (details) => {
+                            if (audioTagRef.current) {
+                                audioTagRef.current.currentTime = details.seekTime;
+                                setCurrentTime(details.seekTime);
+                            }
+                        });
+                    }
+                }, [activeTrack, isPlaying]);
+
+                useEffect(() => {
+                    if ('mediaSession' in navigator) {
+                        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+                    }
+                }, [isPlaying]);
 
                 const fmtSec = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')};`;
 
@@ -830,11 +977,148 @@
                         url: video.url,
                         artist: fallbackArtist,
                         title: fallbackTitle,
-                        videoId: video.id
+                        videoId: video.id,
+                        thumbnail: video.thumbnail
                     });
                 };
 
                 const [ytDownloadProgress, setYtDownloadProgress] = useState({});
+                const [batchDownloadQueue, setBatchDownloadQueue] = useState([]);
+                const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+                const [seenDownloadsCount, setSeenDownloadsCount] = useState(0);
+                const [isMixMode, setIsMixMode] = useState(false);
+
+                const handleBatchUpload = async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+
+                    const reader = new FileReader();
+                    reader.onload = async (event) => {
+                        const b64 = event.target.result.split(',')[1];
+                        try {
+                            const res = await window.pywebview.api.extract_batch_metadata(b64);
+                            if (res.status === 'success' && res.songs.length > 0) {
+                                setBatchDownloadQueue(prev => [...prev, ...res.songs]);
+                                alert(`Se cargaron ${res.songs.length} canciones al lote de descarga.`);
+                            } else {
+                                alert("No se encontraron canciones en el archivo.");
+                            }
+                        } catch (err) {
+                            console.error("Batch error:", err);
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                };
+
+                const processNextBatchItem = async () => {
+                    if (batchDownloadQueue.length === 0 || isBatchProcessing) return;
+                    
+                    setIsBatchProcessing(true);
+                    const nextItem = batchDownloadQueue[0];
+                    
+                    try {
+                        const term = `${nextItem.artist} - ${nextItem.title}`;
+                        const sres = await fetch('http://127.0.0.1:5888/api/search', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ query: term })
+                        });
+                        const sdata = await sres.json();
+                        
+                        if (sdata.status === 'success' && sdata.results.length > 0) {
+                            const bestMatch = sdata.results[0];
+                            const videoId = bestMatch.id;
+                            const tempTrackId = `temp-batch-${videoId}`;
+                            
+                            const tempTrack = {
+                                id: tempTrackId,
+                                videoId: videoId,
+                                title: nextItem.title + " (Descargando...)",
+                                artist: nextItem.artist,
+                                coverUrl: bestMatch.thumbnail || null,
+                                duration: 0,
+                                isDownloading: true,
+                                dateAdded: Date.now() + 1000
+                            };
+                            
+                            setLibrary(prev => [tempTrack, ...prev]);
+                            setYtDownloadProgress(prev => ({ ...prev, [videoId]: "0.0" }));
+
+                            // Poll for progress during batch download
+                            const pollInterval = setInterval(async () => {
+                                try {
+                                    const pres = await fetch(`http://127.0.0.1:5888/api/progress?id=${videoId}`);
+                                    const pdata = await pres.json();
+                                    if (pdata.status === 'success') {
+                                        setYtDownloadProgress(prev => {
+                                            if (prev[videoId] === pdata.progress) return prev;
+                                            return { ...prev, [videoId]: pdata.progress };
+                                        });
+                                        if (parseFloat(pdata.progress) >= 100) clearInterval(pollInterval);
+                                    }
+                                } catch (e) { clearInterval(pollInterval); }
+                            }, 1000);
+
+                            const dres = await fetch('http://127.0.0.1:5888/api/download', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ 
+                                    url: bestMatch.url, 
+                                    artist: nextItem.artist, 
+                                    title: nextItem.title, 
+                                    videoId: videoId 
+                                })
+                            });
+                            
+                            const ddata = await dres.json();
+                            clearInterval(pollInterval);
+                            
+                            if (ddata.status === 'success') {
+                                const enhancedTrack = {
+                                    ...ddata.track,
+                                    coverUrl: ddata.track.ytThumbnail || ddata.track.uploaderThumbnail || null
+                                };
+                                
+                                await window.StorageApi.saveTrack(enhancedTrack);
+                                
+                                const finalUpdate = prev => {
+                                    const next = prev.filter(t => t.id !== tempTrackId);
+                                    return [enhancedTrack, ...next];
+                                };
+                                
+                                setLibrary(finalUpdate);
+                                setOriginalQueue(finalUpdate);
+                                setPlaybackQueue(finalUpdate);
+                                setEnrichmentQueue(prev => [...prev, enhancedTrack.id]);
+                            } else {
+                                setLibrary(prev => prev.filter(t => t.id !== tempTrackId));
+                            }
+                            
+                            setYtDownloadProgress(prev => {
+                                const next = { ...prev };
+                                delete next[videoId];
+                                return next;
+                            });
+                        }
+                    } catch (err) {
+                        console.error("Error in batch item:", err);
+                    } finally {
+                        setBatchDownloadQueue(prev => prev.slice(1));
+                        setIsBatchProcessing(false);
+                    }
+                };
+
+                useEffect(() => {
+                    if (batchDownloadQueue.length > 0 && !isBatchProcessing) {
+                        processNextBatchItem();
+                    }
+                }, [batchDownloadQueue, isBatchProcessing]);
+
+                useEffect(() => {
+                    if (view === 'downloads') {
+                        setSeenDownloadsCount(Object.keys(ytDownloadProgress).length + batchDownloadQueue.length);
+                    }
+                }, [view, ytDownloadProgress, batchDownloadQueue]);
 
                 const confirmYtDownload = async () => {
                     if (!ytPromptData.artist.trim() || !ytPromptData.title.trim() || !ytPromptData.url) {
@@ -842,11 +1126,23 @@
                         return;
                     }
 
-                    const { url, artist, title, videoId } = ytPromptData;
+                    const { url, artist, title, videoId, thumbnail } = ytPromptData;
                     setYtPromptData({ ...ytPromptData, visible: false });
 
-                    // Inicializar progreso visual si hay un ID
+                    // Visual feedback placeholder
                     if (videoId) {
+                        const tempTrackId = `temp-${videoId}`;
+                        const tempTrack = {
+                            id: tempTrackId,
+                            videoId,
+                            title,
+                            artist,
+                            coverUrl: thumbnail || null,
+                            duration: 0,
+                            isDownloading: true,
+                            dateAdded: Date.now()
+                        };
+                        setLibrary(prev => [tempTrack, ...prev]);
                         setYtDownloadProgress(prev => ({ ...prev, [videoId]: "0.0" }));
                         
                         const pollInterval = setInterval(async () => {
@@ -854,15 +1150,14 @@
                                 const pres = await fetch(`http://127.0.0.1:5888/api/progress?id=${videoId}`);
                                 const pdata = await pres.json();
                                 if (pdata.status === 'success') {
-                                    setYtDownloadProgress(prev => ({ ...prev, [videoId]: pdata.progress }));
+                                    setYtDownloadProgress(prev => {
+                                        if (prev[videoId] === pdata.progress) return prev;
+                                        return { ...prev, [videoId]: pdata.progress };
+                                    });
                                     if (parseFloat(pdata.progress) >= 100) clearInterval(pollInterval);
                                 }
-                            } catch (e) {
-                                clearInterval(pollInterval);
-                            }
+                            } catch (e) { clearInterval(pollInterval); }
                         }, 1000);
-                        
-                        // Guardar la referencia al intervalo de ser necesario o dejarlo auto-limpiable en caso de error.
                     }
 
                     try {
@@ -872,43 +1167,47 @@
                             body: JSON.stringify({ url, artist, title, videoId })
                         });
 
-                        const data = await res.json();
-                        if (data.status === 'success') {
-                            // Agregar a la biblioteca temporal si no existe o lanzar re-escan
-                            setTimeout(() => alert(`"${title}" descargada con éxito.`), 300);
-                            // Idealmente relanzamos scanFolder() o agregamos al state `library`:
-                            setLibrary(prev => [data.track, ...prev]);
-                            window.StorageApi.saveTracks([data.track, ...library]);
-                            setOriginalQueue(prev => [data.track, ...prev]);
-                            setPlaybackQueue(prev => [data.track, ...prev]);
+                        const pdata = await res.json();
+                        console.log("[Download] Server response:", pdata);
+                        if (pdata.status === 'success') {
+                            const enhancedTrack = {
+                                ...pdata.track,
+                                coverUrl: pdata.track.ytThumbnail || pdata.track.uploaderThumbnail || null
+                            };
+                            console.log("[Download] Enhanced track object:", enhancedTrack);
 
-                            if (videoId) {
-                                setYtDownloadProgress(prev => {
-                                    const next = { ...prev };
-                                    delete next[videoId];
-                                    return next;
-                                });
-                            }
-                        } else {
-                            alert("Fallo la descarga.");
-                            if (videoId) {
-                                setYtDownloadProgress(prev => {
-                                    const next = { ...prev };
-                                    delete next[videoId];
-                                    return next;
-                                });
-                            }
-                        }
-                    } catch (error) {
-                        console.error('Error in download:', error);
-                        alert("Error al contactar con el downloader.");
-                        if (videoId) {
-                            setYtDownloadProgress(prev => {
+                            // Save to IndexedDB (Persistent local copy)
+                            await window.StorageApi.saveTrack(enhancedTrack);
+                            console.log("[Download] Saved to IndexedDB");
+
+                            const updateList = (prev) => {
+                                console.log("[Download] Updating library. Previous size:", prev.length);
+                                // Filter out the temp placeholder by videoId if present
+                                let next = prev.filter(t => t.id !== `temp-${videoId}`);
+                                // Also filter by filePath to avoid duplicates if replace was triggered
+                                next = next.filter(t => t.filePath !== enhancedTrack.filePath);
+                                const newList = [enhancedTrack, ...next];
+                                console.log("[Download] New library size:", newList.length);
+                                return newList;
+                            };
+
+                            setLibrary(updateList);
+                            setOriginalQueue(updateList);
+                            setPlaybackQueue(updateList);
+                            setEnrichmentQueue(prev => [...prev, enhancedTrack.id]);
+
+                            if (videoId) setYtDownloadProgress(prev => {
                                 const next = { ...prev };
                                 delete next[videoId];
                                 return next;
                             });
+                        } else {
+                            alert(`Fallo la descarga: ${pdata.message || 'Error desconocido'}`);
+                            setLibrary(prev => prev.filter(t => t.id !== `temp-${videoId}`));
                         }
+                    } catch (error) {
+                        console.error('Error in download:', error);
+                        setLibrary(prev => prev.filter(t => t.id !== `temp-${videoId}`));
                     }
                 };
 
@@ -958,10 +1257,20 @@
 
                 // Advanced Audio state
                 const [playbackQueue, setPlaybackQueue] = useState([]);
+                const playbackQueueRef = useRef([]);
+                useEffect(() => { playbackQueueRef.current = playbackQueue; }, [playbackQueue]);
+
                 const [originalQueue, setOriginalQueue] = useState([]);
+
                 const [currentTrackIndex, setCurrentTrackIndex] = useState(-1);
+                const currentTrackIndexRef = useRef(-1);
+                useEffect(() => { currentTrackIndexRef.current = currentTrackIndex; }, [currentTrackIndex]);
+
                 const [isShuffle, setIsShuffle] = useState(false);
+
                 const [repeatMode, setRepeatMode] = useState('off'); // 'off', 'all', 'one'
+                const repeatModeRef = useRef('off');
+                useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
                 const [audioDeviceId, setAudioDeviceId] = useState(null);
                 const [draggedIdx, setDraggedIdx] = useState(null);
 
@@ -995,10 +1304,11 @@
 
                 // AI Assistant State
                 const [aiMessages, setAiMessages] = useState([
-                    { role: 'ai', text: '¡Hola! Soy Chakras Guru, tu asistente musical. ¿Qué te gustaría escuchar hoy? Puedo buscar temas relajantes, hacer playlists para entrenar, o sorprendente con algo aleatorio.', playlist: null, playlistName: null }
+                    { role: 'ai', text: '¡Hola! Soy tu asistente de ChakrasPlayer. ¿Qué te gustaría escuchar hoy? Puedo buscar temas relajantes, hacer playlists para entrenar, o sorprendente con algo aleatorio.', playlist: null, playlistName: null }
                 ]);
                 const [aiInput, setAiInput] = useState('');
                 const [isAiThinking, setIsAiThinking] = useState(false);
+                const [aiCallCount, setAiCallCount] = useState(0);
                 const chatEndRef = useRef(null);
 
                 // Scroll to bottom of Chat
@@ -1029,6 +1339,7 @@
                         const data = await res.json();
                         
                         if (data.status === 'success') {
+                            if (data.usageCount !== undefined) setAiCallCount(data.usageCount);
                             setAiMessages(prev => [...prev, {
                                 role: 'ai',
                                 text: data.reply,
@@ -1090,6 +1401,13 @@
                 const uiProgressInputRef = useRef(null);
                 const uiCurrentTimeTextRef = useRef(null);
 
+                const audioTagRef2 = useRef(null);
+                const sourceNodeRef2 = useRef(null);
+                const gainNodeRef2 = useRef(null);
+                const mainGainRef = useRef(null);
+                const activeTagIdx = useRef(0);
+                const isCrossfading = useRef(false);
+
                 // Init Audio Engine with MediaElementSource
                 const initAudioEngine = useCallback(() => {
                     if (!audioContextRef.current) {
@@ -1107,28 +1425,43 @@
                             filter.type = i === 0 ? 'lowshelf' : i === eqBands.length - 1 ? 'highshelf' : 'peaking';
                             filter.frequency.value = band.freq;
                             filter.Q.value = 1;
-                            filter.gain.value = isEqEnabled ? band.gain : 0; // Apply initial gain from state
+                            filter.gain.value = isEqEnabled ? band.gain : 0;
                             return filter;
                         });
 
-                        // We wrap the <audio> element found in the DOM
-                        if (!audioTagRef.current) {
-                            audioTagRef.current = document.getElementById('engine-audio-tag');
-                        }
+                        // Two audio tags for crossfade
+                        if (!audioTagRef.current) audioTagRef.current = document.getElementById('engine-audio-tag');
+                        if (!audioTagRef2.current) audioTagRef2.current = document.getElementById('engine-audio-tag-2');
 
                         sourceNodeRef.current = audioContextRef.current.createMediaElementSource(audioTagRef.current);
+                        sourceNodeRef2.current = audioContextRef.current.createMediaElementSource(audioTagRef2.current);
 
-                        // Routing: Source -> EQ1 -> ... -> EQ10 -> Gain -> Analyser -> Dest
-                        let lastNode = sourceNodeRef.current;
-                        eqNodesRef.current.forEach(node => {
-                            lastNode.connect(node);
-                            lastNode = node;
-                        });
-                        lastNode.connect(gainNodeRef.current);
-                        gainNodeRef.current.connect(analyserRef.current);
+                        gainNodeRef.current = audioContextRef.current.createGain(); // For tag 1
+                        gainNodeRef2.current = audioContextRef.current.createGain(); // For tag 2
+                        
+                        // Routing: Source1/2 -> individual nodes -> EQ chain -> mainGain -> Analyser -> Dest
+                        sourceNodeRef.current.connect(gainNodeRef.current);
+                        sourceNodeRef2.current.connect(gainNodeRef2.current);
+
+                        gainNodeRef.current.connect(eqNodesRef.current[0]);
+                        gainNodeRef2.current.connect(eqNodesRef.current[0]);
+
+                        let lastNode = eqNodesRef.current[0];
+                        for (let i = 1; i < eqNodesRef.current.length; i++) {
+                            lastNode.connect(eqNodesRef.current[i]);
+                            lastNode = eqNodesRef.current[i];
+                        }
+
+                        // Main output gain
+                        const mainGain = audioContextRef.current.createGain();
+                        mainGain.gain.value = volume;
+                        mainGainRef.current = mainGain;
+
+                        lastNode.connect(mainGain);
+                        mainGain.connect(analyserRef.current);
                         analyserRef.current.connect(audioContextRef.current.destination);
 
-                        addLog("Motor Audio (MediaElement) inicializado", 'info');
+                        addLog("Motor Audio (Multi-Source X-Fade) inicializado", 'info');
                     }
                     if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
                         audioContextRef.current.resume();
@@ -1188,15 +1521,57 @@
                 // 1. App Initialization (Load DB)
                 useEffect(() => {
                     const loadInitialData = async () => {
-                        const savedPath = await window.StorageApi.getSetting('directoryPath');
-                        if (savedPath) {
-                            setSavedFolderPath(savedPath);
-                            const tracks = await window.StorageApi.getAllTracks();
-                            setLibrary(tracks.sort((a, b) => b.dateAdded - a.dateAdded));
-                            setPermissionNeeded(false);
-                        } else {
-                            const tracks = await window.StorageApi.getAllTracks();
-                            setLibrary(tracks.sort((a, b) => b.dateAdded - a.dateAdded));
+                        try {
+                            // First, load from IndexedDB for speed
+                            const localTracks = await window.StorageApi.getAllTracks();
+                            if (localTracks.length > 0) {
+                                setLibrary(localTracks.sort((a, b) => b.dateAdded - a.dateAdded));
+                            }
+
+                            const savedPath = await window.StorageApi.getSetting('directoryPath');
+                            if (savedPath) setSavedFolderPath(savedPath);
+
+                            // Then, sync with Server
+                            const res = await fetch('http://127.0.0.1:5888/api/library', { method: 'POST' });
+                            const data = await res.json();
+                            if (data.status === 'success' && data.tracks) {
+                                const serverTracks = data.tracks;
+                                const localTracksNow = await window.StorageApi.getAllTracks();
+                                const localMap = new Map(localTracksNow.map(t => [t.filePath?.toLowerCase().replace(/\\/g, '/'), t]));
+                                
+                                let changed = false;
+                                const merged = [...localTracksNow];
+                                
+                                serverTracks.forEach(st => {
+                                    const pathKey = st.filePath?.toLowerCase().replace(/\\/g, '/');
+                                    if (!localMap.has(pathKey)) {
+                                        merged.push(st);
+                                        changed = true;
+                                    } else {
+                                        // Update metadata if it was a placeholder or enriched on server
+                                        const local = localMap.get(pathKey);
+                                        if (st.duration > local.duration || st.ytThumbnail || (st.album && st.album !== local.album)) {
+                                            const idx = merged.findIndex(t => t.id === local.id);
+                                            // CRITICAL: Preserve enriched data if server returns null/default
+                                            const updated = { ...local, ...st };
+                                            if (!st.coverUrl && local.coverUrl) updated.coverUrl = local.coverUrl;
+                                            if (!st.album && local.album) updated.album = local.album;
+                                            if (!st.releaseYear && local.releaseYear) updated.releaseYear = local.releaseYear;
+                                            
+                                            merged[idx] = updated;
+                                            changed = true;
+                                        }
+                                    }
+                                });
+
+                                if (changed) {
+                                    const sortedMerged = merged.sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
+                                    setLibrary(sortedMerged);
+                                    await window.StorageApi.saveTracks(sortedMerged);
+                                }
+                            }
+                        } catch (err) {
+                            console.error("Startup sync error:", err);
                         }
 
                         const savedDevice = await window.StorageApi.getSetting('audioDeviceId');
@@ -1207,6 +1582,13 @@
                     };
                     loadInitialData();
                 }, []);
+
+                // Auto-scan on startup when path is available
+                useEffect(() => {
+                    if (isServerConnected && savedFolderPath) {
+                        performScan(savedFolderPath, true);
+                    }
+                }, [isServerConnected, !!savedFolderPath]);
 
                 useEffect(() => {
                     document.documentElement.style.setProperty('--glass-blur', `${themeSettings.blur}px`);
@@ -1278,45 +1660,65 @@
                 };
 
                 const performScan = async (path, isStartup = false) => {
-                    console.log(`[Scan] Initiating scan for: ${path}`);
                     try {
                         setIsScanning(true);
                         const data = await window.pywebview.api.scan_folder(path);
                         if (!data || data.status !== 'success') {
                             throw new Error(data?.message || 'Bridge scan failed');
                         }
-                        console.log(`[Scan] Server response:`, data);
 
                         if (data.status === 'success') {
-                            const existingTracks = await window.StorageApi.getAllTracks();
-                            const existingMap = new Map(existingTracks.map(t => [t.filePath || t.fileName, t]));
-
-                            const newTracks = data.tracks.map(t => {
-                                const existing = existingMap.get(t.filePath || t.fileName);
-                                if (existing) {
-                                    // Prefer enriched metadata from DB if it's better than file tags
-                                    return {
+                            // FETCH SERVER LIBRARY (Downloads) to avoid losing them in the scan
+                            let serverLibraryTracks = [];
+                            try {
+                                const sres = await fetch('http://127.0.0.1:5888/api/library', { method: 'POST' });
+                                const sdata = await sres.json();
+                                if (sdata.status === 'success' && sdata.tracks) {
+                                    serverLibraryTracks = sdata.tracks.map(t => ({
                                         ...t,
-                                        id: existing.id,
-                                        playCount: existing.playCount || 0,
-                                        rating: existing.rating || 0,
-                                        duration: t.duration || existing.duration || 0,
-                                        dateAdded: existing.dateAdded || Date.now(),
-                                        coverUrl: existing.coverUrl || t.coverUrl,
-                                        album: (existing.album !== "Unknown Album" ? existing.album : t.album),
-                                        artist: (existing.artist !== "Unknown Artist" ? existing.artist : t.artist),
-                                        releaseYear: existing.releaseYear || t.releaseYear,
-                                        genre: existing.genre || t.genre
-                                    };
+                                        coverUrl: t.coverUrl || t.ytThumbnail || t.uploaderThumbnail || null
+                                    }));
                                 }
-                                return { ...t, dateAdded: Date.now() };
+                            } catch (err) {
+                                console.warn("[Scan] Error fetching server library:", err);
+                            }
+
+                            const existingTracks = await window.StorageApi.getAllTracks();
+                            const combinedMap = new Map();
+
+                            // 1. Add existing tracks from local DB (prefer enriched data)
+                            existingTracks.forEach(t => {
+                                const key = t.filePath?.toLowerCase().replace(/\\/g, '/');
+                                if (key) combinedMap.set(key, t);
                             });
 
-                            newTracks.sort((a, b) => b.dateAdded - a.dateAdded);
+                            // 2. Add server library (official downloads)
+                            serverLibraryTracks.forEach(t => {
+                                const key = t.filePath?.toLowerCase().replace(/\\/g, '/');
+                                if (key) {
+                                    const existing = combinedMap.get(key);
+                                    // Merge server data
+                                    combinedMap.set(key, { ...existing, ...t });
+                                }
+                            });
 
-                            // --- AUTO-SANITIZATION (Decisive Fix) ---
-                            // Identify files with non-ASCII or messy characters
-                            const needsSanitization = newTracks.filter(t => /[^\x00-\x7F]/.test(t.fileName));
+                            // 3. Add fresh scan results
+                            data.tracks.forEach(t => {
+                                const key = t.filePath?.toLowerCase().replace(/\\/g, '/');
+                                if (key) {
+                                    const existing = combinedMap.get(key);
+                                    if (!existing || (!existing.coverUrl && t.coverUrl)) {
+                                        combinedMap.set(key, { ...existing, ...t });
+                                    } else {
+                                        combinedMap.set(key, { ...t, ...existing });
+                                    }
+                                }
+                            });
+
+                            let finalLibrary = Array.from(combinedMap.values());
+
+                            // --- AUTO-SANITIZATION ---
+                            const needsSanitization = finalLibrary.filter(t => /[^\x00-\x7F]/.test(t.fileName));
                             if (needsSanitization.length > 0) {
                                 console.log(`[Sanitize] ${needsSanitization.length} tracks have messy filenames. Auto-fixing...`);
                                 for (const track of needsSanitization) {
@@ -1336,17 +1738,19 @@
                                 }
                             }
 
-                            setLibrary(newTracks);
-                            setOriginalQueue(newTracks);
-                            setPlaybackQueue(newTracks);
-                            await window.StorageApi.clearTracks();
-                            await window.StorageApi.saveTracks(newTracks);
+                            finalLibrary.sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
 
-                            const needsEnrichment = newTracks.filter(t => !t.coverUrl || t.album === "Unknown Album" || t.artist === "Unknown Artist").map(t => t.id);
+                            setLibrary(finalLibrary);
+                            setOriginalQueue(finalLibrary);
+                            setPlaybackQueue(finalLibrary);
+                            await window.StorageApi.clearTracks();
+                            await window.StorageApi.saveTracks(finalLibrary);
+
+                            const needsEnrichment = finalLibrary.filter(t => !t.coverUrl || t.album === "Unknown Album" || t.artist === "Unknown Artist").map(t => t.id);
                             setEnrichmentQueue(needsEnrichment);
 
                             if (!isStartup) {
-                                alert(`Scan Complete: Found ${newTracks.length} songs.`);
+                                alert(`Scan Complete: Found ${finalLibrary.length} songs.`);
                             }
                         } else {
                             console.error("[Scan] Server error:", data.message);
@@ -1354,7 +1758,7 @@
                         }
                     } catch (e) {
                         console.error("[Scan] Fetch failed:", e);
-                        if (!isStartup) alert(`Cannot connect to the backend server. Make sure the Python app is running. (Error: ${e.message})`);
+                        if (!isStartup) alert(`Cannot connect to the backend server. (Error: ${e.message})`);
                     } finally {
                         setIsScanning(false);
                     }
@@ -1383,89 +1787,63 @@
                         setCurrentlyEnriching(trackId);
 
                         try {
-                            let track = library.find(t => t.id === trackId);
-                            if (track && (!track.coverUrl || track.album === "Unknown Album" || track.artist === "Unknown Artist" || !track.releaseYear)) {
-                                let enriched = false;
+                            const track = library.find(t => t.id === trackId);
+                            if (track) {
+                                // Clean title for better search (frontend side too for speed)
+                                const cleanTitle = track.title.replace(/\[.*?(official|music|video|audio|lyric|live|remaster).*?\]|\(.*?(official|music|video|audio|lyric|live|remaster).*?\)/gi, '').trim();
 
-                                // 0. Memory Optimization: Album Cache Check
-                                // If another track from this exact same album already has a cover, copy it immediately
-                                if (track.album !== "Unknown Album" && track.artist !== "Unknown Artist") {
-                                    const cachedItem = library.find(t => t.artist === track.artist && t.album === track.album && t.coverUrl && t.id !== track.id);
-                                    if (cachedItem) {
-                                        if (!track.coverUrl) track.coverUrl = cachedItem.coverUrl;
-                                        if (!track.releaseYear) track.releaseYear = cachedItem.releaseYear;
-                                        if (!track.genre) track.genre = cachedItem.genre;
-                                        enriched = true;
-                                    }
-                                }
-
-                                // 4. (REMOVED) Web Image Search (DuckDuckGo fallback)
-                                // Removed for safety - broad web searches can return unrelated or adult content.
-                                /*
-                                if (!track.coverUrl) {
-                                    setEnrichmentStep('Búsqueda profunda web DuckDuckGo...');
-                                    try {
-                                        const albumTerm = track.album !== "Unknown Album" ? track.album : "";
-                                        const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchTerm + ' ' + albumTerm + ' album cover')}`;
-                                        const webHtml = await fetchWithProxyFallback(ddgUrl);
-    
-                                        const imgMatch = webHtml.match(/src="\/\/external-content\.duckduckgo\.com\/iu\/\?u=([^"&]+)/);
-                                        if (imgMatch && imgMatch[1]) {
-                                            track.coverUrl = decodeURIComponent(imgMatch[1]);
-                                            enriched = true;
-                                        }
-                                    } catch (e) {
-                                        console.warn("Web Search Content failed for", track.title);
-                                    }
-                                }
-                                */
-
-                                // Force populate Album Name if blank
-                                if (track.album === "Unknown Album") {
-                                    track.album = track.artist !== "Unknown Artist" ? track.artist : "Unknown";
-                                    enriched = true;
-                                }
-
-                                if (enriched) {
-                                    await window.StorageApi.updateTrack(track.id, {
-                                        coverUrl: track.coverUrl,
-                                        album: track.album,
+                                const res = await fetch('http://127.0.0.1:5888/api/enrich-metadata', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ 
+                                        title: cleanTitle || track.title, 
                                         artist: track.artist,
-                                        releaseYear: track.releaseYear,
-                                        genre: track.genre
-                                    });
+                                        ytThumbnail: track.ytThumbnail,
+                                        uploaderThumbnail: track.uploaderThumbnail
+                                    })
+                                });
+                                
+                                if (res.ok) {
+                                    const enriched = await res.json();
+                                    
+                                    const updatedFields = {
+                                        coverUrl: enriched.coverUrl || track.coverUrl,
+                                        album: (enriched.album && enriched.album !== "None") ? enriched.album : track.album,
+                                        releaseYear: enriched.releaseYear || track.releaseYear
+                                    };
 
-                                    // Write back to file via Backend
+                                    await window.StorageApi.updateTrack(track.id, updatedFields);
+
+                                    // Update all states to reflect changes
+                                    const updateFn = prev => prev.map(t => t.id === track.id ? { ...t, ...updatedFields } : t);
+                                    setLibrary(updateFn);
+                                    setPlaybackQueue(updateFn);
+                                    setOriginalQueue(updateFn);
+
+                                    // PERSIST on server/file too
                                     try {
-                                        const payload = {
-                                            id: track.id,
-                                            title: track.title,
-                                            artist: track.artist,
-                                            album: track.album,
-                                            genre: track.genre
-                                        };
-                                        await window.pywebview.api.edit_metadata(payload);
-                                    } catch (err) {
-                                        console.warn("Failed to write metadata back to file for", track.title);
-                                    }
-
-                                    // Batch update library to avoid scroll freezing
-                                    setLibrary(prev => prev.map(t => t.id === track.id ? { ...t, coverUrl: track.coverUrl, album: track.album, artist: track.artist, releaseYear: track.releaseYear, genre: track.genre } : t));
+                                        fetch('http://127.0.0.1:5888/api/edit-metadata', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                                filePath: track.filePath,
+                                                title: track.title,
+                                                artist: track.artist,
+                                                album: updatedFields.album,
+                                                year: updatedFields.releaseYear,
+                                                coverUrl: updatedFields.coverUrl
+                                            })
+                                        });
+                                    } catch (e) { console.warn("Failed to persist enrichment to server", e); }
                                 }
                             }
                         } catch (e) {
                             console.error("Error processing enrichment loop", e);
                         }
 
-                        // Remove from queue and setup next
                         setEnrichmentQueue(prev => prev.slice(1));
                         setCurrentlyEnriching(null);
                         setEnrichmentStep('');
-
-                        // Rate Limiting Delay (3 seconds)
-                        timeoutId = setTimeout(() => {
-                            // handled by effect dependency
-                        }, 3000);
                     };
 
                     // Add a small delay for the very first item starting to not block rendering
@@ -1529,32 +1907,57 @@
                 };
 
                 const parseLrc = (lrcString) => {
+                    if (!lrcString) return [];
                     const lines = lrcString.split('\n');
                     const result = [];
                     const timeExp = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/g;
+                    
+                    let hasSync = false;
                     lines.forEach(line => {
                         let match;
                         const times = [];
+                        let text = line;
+                        
                         // Extract all timestamps in the line
+                        let foundTimestamp = false;
                         while ((match = timeExp.exec(line)) !== null) {
+                            foundTimestamp = true;
+                            hasSync = true;
                             const min = parseInt(match[1], 10);
                             const sec = parseInt(match[2], 10);
-                            const ms = parseInt(match[3], 10);
-                            const time = min * 60 + sec + (ms / (match[3].length === 2 ? 100 : 1000));
+                            const msStr = match[3];
+                            const ms = parseInt(msStr, 10);
+                            // Adjust for 2 or 3 digit ms
+                            const time = min * 60 + sec + (ms / (msStr.length === 2 ? 100 : 1000));
                             times.push(time);
                         }
-                        // The text is the line with all timestamps removed
-                        const text = line.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').trim();
-                        if (text && times.length > 0) {
-                            times.forEach(t => result.push({ time: t, text }));
+                        
+                        text = line.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').trim();
+                        if (text) {
+                            if (times.length > 0) {
+                                times.forEach(t => result.push({ time: t, text }));
+                            } else if (!foundTimestamp) {
+                                // For plain text lines
+                                result.push({ time: -1, text });
+                            }
                         }
                     });
-                    // Sort by time just in case multiple tags were out of order
-                    return result.sort((a, b) => a.time - b.time);
+                    
+                    if (hasSync) {
+                        return result.sort((a, b) => a.time - b.time);
+                    }
+                    return result;
                 };
 
                 const loadLyrics = async (artist, title, album, duration) => {
                     if (!artist || !title) return;
+                    
+                    // Try internal lyrics first
+                    if (activeTrack && activeTrack.lyrics) {
+                        setLyricsData(parseLrc(activeTrack.lyrics));
+                        return;
+                    }
+
                     setLyricsLoading(true);
                     setLyricsError(null);
                     setLyricsData(null);
@@ -1567,8 +1970,8 @@
                         if (duration) {
                             try {
                                 const res = await fetch(`https://lrclib.net/api/get?track_name=${encodeURIComponent(cleanTitle)}&artist_name=${encodeURIComponent(artist)}&album_name=${encodeURIComponent(album !== 'Unknown Album' ? album : '')}&duration=${Math.round(duration)}`);
-                                if (false) {
-                                    const data = { status: 'offline' };
+                                if (res.ok) {
+                                    const data = await res.json();
                                     if (data.syncedLyrics) lrclibData = data.syncedLyrics;
                                     else if (data.plainLyrics) lrclibData = data.plainLyrics;
                                 }
@@ -1577,30 +1980,41 @@
 
                         // If lrclib fails, try our massive backend crawler
                         if (!lrclibData) {
-                            /* const localRes = null; // await fetch('/api/lyrics', {
-    //                             method: 'POST',
-    //                             headers: { 'Content-Type': 'application/json' },
-    //                             body: JSON.stringify({ artist, title: cleanTitle })
-                            }); */
-                            if (false) { // Offline
-                                const data = { status: 'offline' };
-                                if (data.status === 'success' && data.lyrics) {
-                                    lrclibData = data.lyrics; // Backend returns raw LRC string
-                                }
-                            }
+                             try {
+                                 const localRes = await fetch('http://127.0.0.1:5888/api/enrich-metadata', {
+                                     method: 'POST',
+                                     headers: { 'Content-Type': 'application/json' },
+                                     body: JSON.stringify({ artist, title: cleanTitle })
+                                 });
+                                 if (localRes.ok) {
+                                     const data = await localRes.json();
+                                     if (data.lyrics && !data.lyrics.includes("No se encontraron letras")) {
+                                         lrclibData = data.lyrics;
+                                     }
+                                 }
+                             } catch (e) {
+                                 console.warn("Backend enrichment lyrics fallback failed", e);
+                             }
                         }
 
                         // Parse and Set
                         if (lrclibData) {
-                            // If it contains brackets with numbers like [00:12.34], it's synced
-                            const timeExp = /\[\d{2}:\d{2}\.\d{2,3}\]/;
-                            if (timeExp.test(lrclibData)) {
-                                setLyricsData(parseLrc(lrclibData));
-                            } else {
-                                // Split plain lyrics into lines with time = -1
-                                const lines = lrclibData.split('\n').map(l => l.trim()).filter(l => l);
-                                setLyricsData(lines.map(text => ({ time: -1, text })));
-                            }
+                            const parsed = parseLrc(lrclibData);
+                            setLyricsData(parsed);
+                            
+                            // PERSIST on server/file
+                            try {
+                                fetch('http://127.0.0.1:5888/api/edit-metadata', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        filePath: activeTrack.filePath,
+                                        title: activeTrack.title,
+                                        artist: activeTrack.artist,
+                                        lyrics: lrclibData
+                                    })
+                                });
+                            } catch (e) { }
                         } else {
                             setLyricsError('We scoured the web, but no lyrics were found for this track.');
                         }
@@ -1611,43 +2025,50 @@
                     }
                 };
 
-                const nextTrack = useCallback((isAutoNext = false) => {
-                    if (playbackQueue.length === 0) return;
+                const nextTrack = useCallback((isAutoNext = false, isTransition = false) => {
+                    const queue = playbackQueueRef.current;
+                    const index = currentTrackIndexRef.current;
+                    const rMode = repeatModeRef.current;
+
+                    if (queue.length === 0) return;
                     let nextIdx;
-                    if (repeatMode === 'one' && isAutoNext) {
-                        nextIdx = currentTrackIndex;
+                    if (rMode === 'one' && isAutoNext && !isTransition) {
+                        nextIdx = index;
                     } else {
-                        nextIdx = (currentTrackIndex + 1) % playbackQueue.length;
+                        nextIdx = (index + 1) % queue.length;
                     }
-                    const track = playbackQueue[nextIdx];
+                    const track = queue[nextIdx];
+                    
+                    if (audioTagRef.current) audioTagRef.current.onended = null;
+                    if (audioTagRef2.current) audioTagRef2.current.onended = null;
+                    
                     setCurrentTrackIndex(nextIdx);
                     setIsPlaying(true);
-                    if (track) playTrackCore(track);
-                }, [playbackQueue, currentTrackIndex, repeatMode, playTrackCore]);
+                    if (track) playTrackCore(track, isTransition);
+                }, [playTrackCore]);
 
                 const prevTrack = useCallback(() => {
-                    if (playbackQueue.length === 0) return;
-                    const prevIdx = currentTrackIndex > 0 ? currentTrackIndex - 1 : playbackQueue.length - 1;
-                    const track = playbackQueue[prevIdx];
+                    const queue = playbackQueueRef.current;
+                    const index = currentTrackIndexRef.current;
+                    if (queue.length === 0) return;
+                    const prevIdx = index > 0 ? index - 1 : queue.length - 1;
+                    const track = queue[prevIdx];
                     setCurrentTrackIndex(prevIdx);
                     setIsPlaying(true);
                     if (track) playTrackCore(track);
-                }, [playbackQueue, currentTrackIndex, playTrackCore]);
+                }, [playTrackCore]);
 
                 const selectTrack = (index, fromLibrary = false) => {
                     let track;
                     let queueIndex;
                     if (fromLibrary) {
-                        track = library[index];
-                        const idxInQueue = playbackQueue.findIndex(t => t.id === track.id);
-                        if (idxInQueue !== -1) {
-                            queueIndex = idxInQueue;
-                        } else {
-                            const newQueue = [...playbackQueue, track];
-                            setPlaybackQueue(newQueue);
-                            setOriginalQueue(newQueue);
-                            queueIndex = newQueue.length - 1;
-                        }
+                        // When playing from library, we load the ENTIRE current library view into the queue
+                        // This allows playing through the whole list as requested.
+                        const newQueue = [...library];
+                        setPlaybackQueue(newQueue);
+                        setOriginalQueue(newQueue);
+                        queueIndex = index;
+                        track = newQueue[index];
                     } else {
                         queueIndex = index;
                         track = playbackQueue[index];
@@ -1687,7 +2108,7 @@
                                 startProgressLoop();
                             }).catch(() => { });
                         } else if (playbackQueue.length > 0 && currentTrackIndex >= 0) {
-                            // No active track yet — load and play
+                            // No active track yet â€” load and play
                             playTrackCore(playbackQueue[currentTrackIndex]);
                         } else if (playbackQueue.length > 0) {
                             setCurrentTrackIndex(0);
@@ -1700,19 +2121,20 @@
                     if (reqAnimFrameRef.current) cancelAnimationFrame(reqAnimFrameRef.current);
 
                     const update = () => {
-                        if (audioTagRef.current && !audioTagRef.current.paused) {
-                            const current = audioTagRef.current.currentTime;
-                            const dur = audioTagRef.current.duration;
+                        const audio = activeTagIdx.current === 0 ? audioTagRef.current : audioTagRef2.current;
+                        if (audio && !audio.paused) {
+                            const current = audio.currentTime;
+                            const dur = audio.duration;
 
                             // Sync Ref for Seek and Lyrics
                             currentProgressRef.current = current;
 
-                            // INP Byass: DOM Manipulation
                             if (dur > 0) {
                                 const perc = (current / dur) * 100;
 
                                 if (uiProgressInputRef.current) {
                                     uiProgressInputRef.current.value = current;
+                                    uiProgressInputRef.current.max = dur;
                                     uiProgressInputRef.current.style.background = `linear-gradient(to right, var(--color-vibrant, var(--color-blurple)) ${perc}%, var(--color-tertiary) ${perc}%)`;
                                 }
 
@@ -1727,7 +2149,7 @@
                                 const queueActiveRow = document.getElementById('active-row-bg-queue');
                                 if (queueActiveRow) queueActiveRow.style.background = `linear-gradient(to right, var(--color-vibrant-dark) 0%, var(--color-vibrant-dark) ${perc}%, transparent ${perc}%, transparent 100%)`;
 
-                                // Karaoke Lyrics Sync (Runs perfectly at 60fps)
+                                // Karaoke Lyrics Sync
                                 if (lyricsDataRef.current && lyricsContainerRef.current) {
                                     const lData = lyricsDataRef.current;
                                     if (lData.length > 0 && lData[0].time !== -1) {
@@ -1742,7 +2164,6 @@
                                             const nLyric = lData[actIdx + 1];
                                             const nextTime = nLyric ? nLyric.time : cLyric.time + 4;
                                             const duration = nextTime - cLyric.time;
-                                            // Calculate progress specifically for this line
                                             let lineProg = Math.max(0, Math.min(100, ((current - cLyric.time) / duration) * 100));
 
                                             const children = lyricsContainerRef.current.children;
@@ -1754,6 +2175,7 @@
                                                     if (!el.classList.contains('active-lyric-line')) {
                                                         el.classList.add('active-lyric-line');
                                                         el.classList.remove('inactive-lyric-line');
+                                                        // Ensure smooth centered scrolling
                                                         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                                     }
                                                     el.style.setProperty('--karaoke-fill', `${lineProg}%`);
@@ -1769,20 +2191,17 @@
                                     }
                                 }
 
-                                // Beat-Sync Dynamic Visualizer Engine
+                                // Visualizer
                                 if (analyserRef.current) {
                                     const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
                                     analyserRef.current.getByteFrequencyData(dataArray);
-                                    // Average the sub-bass / kick frequency bins
                                     let sum = 0;
                                     const bassBins = 8;
                                     for (let i = 0; i < bassBins; i++) sum += dataArray[i];
                                     const avgBass = sum / bassBins;
-
-                                    // Map intensity smoothly: Threshold 160 out of 255
                                     const intensity = Math.max(0, (avgBass - 160) / 95);
-                                    const scale = 1.0 + (intensity * 0.15); // Default active scale is 1.0, jump up to 1.15 on beat for massive pulse
-                                    const brightness = 1.0 + (intensity * 1.5); // Brightness peaks heavily
+                                    const scale = 1.0 + (intensity * 0.15);
+                                    const brightness = 1.0 + (intensity * 1.5);
                                     const pulseOpacity = 0.5 + (intensity * 0.8);
 
                                     document.documentElement.style.setProperty('--beat-scale', scale);
@@ -1790,18 +2209,24 @@
                                     document.documentElement.style.setProperty('--beat-opacity', pulseOpacity);
                                 }
 
-                                // Re-sync React State periodically for Lyrics Engine (Throttled to run only when lyrics map changes)
-                                setCurrentTime(prev => {
-                                    // Only trigger re-render if we jump more than 100ms
-                                    if (Math.abs(prev - current) > 0.1) return current;
-                                    return prev;
-                                });
-                            }
+                                // React Sync
+                                setCurrentTime(prev => (Math.abs(prev - current) > 0.1) ? current : prev);
 
-                            if (dur > 0 && !hasLoggedPlayRef.current && current > (dur * 0.5)) {
-                                hasLoggedPlayRef.current = true;
-                                const track = playbackQueue[currentTrackIndex];
-                                if (track) window.StorageApi.logPlay(track.artist, dur / 60, track.id);
+                                // Stats Logging
+                                if (!hasLoggedPlayRef.current && current > (dur * 0.5)) {
+                                    hasLoggedPlayRef.current = true;
+                                    const track = playbackQueue[currentTrackIndex];
+                                    if (track) window.StorageApi.logPlay(track.artist, dur / 60, track.id);
+                                }
+
+                                // Crossfade Trigger
+                                if (isMixMode && dur > 10 && current > (dur - 5) && !isCrossfading.current) {
+                                    isCrossfading.current = true;
+                                    console.log("[MixMode] Starting 5s Crossfade...");
+                                    const currGain = activeTagIdx.current === 0 ? gainNodeRef.current : gainNodeRef2.current;
+                                    if (currGain) currGain.gain.linearRampToValueAtTime(0, audioContextRef.current.currentTime + 5);
+                                    nextTrack(true, true);
+                                }
                             }
                         }
                         reqAnimFrameRef.current = requestAnimationFrame(update);
@@ -1809,91 +2234,91 @@
                     reqAnimFrameRef.current = requestAnimationFrame(update);
                 };
 
-                const playTrackCore = async (track) => {
+                const playTrackCore = async (track, isCrossfadeTransition = false) => {
                     if (!track) return;
 
                     if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-                        audioContextRef.current.resume().catch(e => console.warn("Failed to resume context:", e));
+                        audioContextRef.current.resume().catch(() => { });
                     }
-
-                    const audio = audioTagRef.current || document.getElementById('engine-audio-tag');
-                    if (!audio) return;
+                    if (!audioContextRef.current) initAudioEngine();
 
                     setIsLoading(true);
                     setPlaybackError(null);
                     hasLoggedPlayRef.current = false;
 
-                    // Cleanup previous Blob URL
-                    if (audio.src.startsWith('blob:')) {
-                        URL.revokeObjectURL(audio.src);
+                    // Switch tags if crossfading
+                    if (isCrossfadeTransition) {
+                        activeTagIdx.current = activeTagIdx.current === 0 ? 1 : 0;
+                    } else {
+                        // Reset if literal click
+                        activeTagIdx.current = 0;
+                        isCrossfading.current = false;
+                        if (gainNodeRef.current) gainNodeRef.current.gain.value = 1;
+                        if (gainNodeRef2.current) gainNodeRef2.current.gain.value = 0;
                     }
 
-                    audio.src = "";
-                    audio.oncanplay = null;
-                    audio.onerror = null;
+                    const audio = activeTagIdx.current === 0 ? audioTagRef.current : audioTagRef2.current;
+                    const otherAudio = activeTagIdx.current === 0 ? audioTagRef2.current : audioTagRef.current;
+                    const gain = activeTagIdx.current === 0 ? gainNodeRef.current : gainNodeRef2.current;
+                    const otherGain = activeTagIdx.current === 0 ? gainNodeRef2.current : gainNodeRef.current;
+                    
+                    if (!audio) return;
 
-                    try {
-                        const filePath = track.filePath || track.path || track.id;
-                        const streamUrl = 'http://127.0.0.1:5888/api/file?path=' + encodeURIComponent(filePath);
+                    // Stop and clear the other tag to prevent overlap
+                    if (otherAudio) {
+                        otherAudio.pause();
+                        if (!isCrossfadeTransition) {
+                            otherAudio.src = ''; 
+                            if (otherGain) otherGain.gain.value = 0;
+                        }
+                    }
 
-                        // LOG DE DIAGNÓSTICO PARA EL USUARIO
-                        console.log(`[Diagnostic] Streaming from: ${streamUrl}`);
+                    const filePath = track.filePath || track.path || track.id;
+                    const streamUrl = 'http://127.0.0.1:5888/api/file?path=' + encodeURIComponent(filePath);
 
-                        // Verificación de existencia (vía servidor)
-                        fetch(streamUrl, { method: 'HEAD' })
-                            .then(res => {
-                                if (res.status === 404) {
-                                    console.error(`[Player] El servidor reporta 404. Archivo no encontrado físicamente: ${filePath}`);
-                                } else {
-                                    console.log(`[Diagnostic] Source Ready: ${streamUrl.substring(0, 50)}... Status: ${res.status}`);
-                                }
-                            })
-                            .catch(err => console.error(`[Player] Error conectando al servidor: ${err}`));
+                    audio.src = streamUrl;
+                    audio.crossOrigin = 'anonymous';
 
-                        // Configuración del elemento de audio
-                        audio.src = streamUrl;
-                        audio.crossOrigin = 'anonymous';
+                    if (isCrossfadeTransition && gain) {
+                        gain.gain.value = 0;
+                        gain.gain.linearRampToValueAtTime(1, audioContextRef.current.currentTime + 5);
+                    }
 
-                        audio.onloadedmetadata = () => {
-                            if (audio.duration && !isNaN(audio.duration) && audio.duration !== Infinity) {
-                                setDuration(audio.duration);
-                                durationRef.current = audio.duration;
-                                if (uiProgressInputRef.current) {
-                                    uiProgressInputRef.current.max = audio.duration;
-                                }
-                            }
-                        };
+                    // Auto-advance when track ends - but only if we ARE currently the active tag
+                    audio.onended = () => {
+                        if (activeTagIdx.current === (audio === audioTagRef.current ? 0 : 1)) {
+                            console.log("[AudioEngine] Track ended, auto-advancing...");
+                            nextTrack(true);
+                        } else {
+                            console.log("[AudioEngine] Secondary tag ended, ignoring signal.");
+                        }
+                    };
 
-                        audio.onerror = (e) => {
-                            console.error("[Player] Audio tag error:", audio.error);
-                            const msg = audio.error ? audio.error.message : 'Demuxer Error (Contexto no válido)';
-                            setPlaybackError(`Error de carga del archivo nativo (${msg})`);
-                            setIsLoading(false);
-                            setIsPlaying(false);
-                        };
+                    audio.onloadedmetadata = () => {
+                        if (audio.duration && !isNaN(audio.duration)) {
+                            setDuration(audio.duration);
+                            durationRef.current = audio.duration;
+                        }
+                    };
 
-                        audio.load();
-
-                        audio.play().then(() => {
-                            setIsPlaying(true);
-                            setIsLoading(false);
-                            setActiveTrack(track);
-                            startProgressLoop();
-                        }).catch((e) => {
-                            if (e.name === 'AbortError') return;
-                            setPlaybackError("Error al iniciar reproducción.");
-                            setIsLoading(false);
-                        });
-
-                    } catch (err) {
-                        console.error("Fatal Playback Error:", err);
-                        setPlaybackError("Error fatal de acceso.");
+                    audio.play().then(() => {
+                        setIsPlaying(true);
                         setIsLoading(false);
-                    }
+                        setActiveTrack(track);
+                        if (!isCrossfadeTransition) {
+                            startProgressLoop();
+                        } else {
+                            // Already in loop
+                            setTimeout(() => { isCrossfading.current = false; }, 6000);
+                        }
+                    }).catch(e => {
+                        if (e.name !== 'AbortError') setPlaybackError("Error al iniciar reproducción.");
+                        setIsLoading(false);
+                    });
                 };
 
 
-                // Main Play Effect — minimal, only syncs UI state, does NOT trigger audio
+                // Main Play Effect â€” minimal, only syncs UI state, does NOT trigger audio
                 useEffect(() => {
                     // Nothing to do here - playback is triggered directly in selectTrack/nextTrack/prevTrack
                 }, [currentTrackIndex]);
@@ -1922,6 +2347,15 @@
                         document.documentElement.style.setProperty('--color-vibrant-dark', 'rgba(88, 101, 242, 0.15)');
                     }
                 }, [activeTrack?.coverUrl]);
+
+                // Reset lyrics state when track changes
+                useEffect(() => {
+                    if (activeTrack) {
+                        setLyricsData(null);
+                        setLyricsLoading(false);
+                        setLyricsError(null);
+                    }
+                }, [activeTrack?.id]);
 
                 useEffect(() => {
                     if (view === 'lyrics' && activeTrack && !lyricsData && !lyricsLoading && !lyricsError) {
@@ -1963,11 +2397,32 @@
                 const handleVolume = (e) => {
                     const vol = Number(e.target.value);
                     setVolume(vol);
-                    if (audioTagRef.current) {
-                        audioTagRef.current.volume = vol;
+                    setIsMuted(vol === 0);
+                    const tags = [audioTagRef.current, audioTagRef2.current];
+                    tags.forEach(t => { if (t) t.volume = vol; });
+                    
+                    if (mainGainRef.current && audioContextRef.current) {
+                        mainGainRef.current.gain.linearRampToValueAtTime(vol, audioContextRef.current.currentTime + 0.1);
                     }
-                    if (gainNodeRef.current && audioContextRef.current) {
-                        gainNodeRef.current.gain.linearRampToValueAtTime(vol, audioContextRef.current.currentTime + 0.1);
+                };
+
+                const toggleMute = () => {
+                    if (isMuted) {
+                        const targetVol = prevVolume > 0 ? prevVolume : 0.5;
+                        setVolume(targetVol);
+                        setIsMuted(false);
+                        if (audioTagRef.current) audioTagRef.current.volume = targetVol;
+                        if (gainNodeRef.current && audioContextRef.current) {
+                            gainNodeRef.current.gain.linearRampToValueAtTime(targetVol, audioContextRef.current.currentTime + 0.1);
+                        }
+                    } else {
+                        setPrevVolume(volume);
+                        setVolume(0);
+                        setIsMuted(true);
+                        if (audioTagRef.current) audioTagRef.current.volume = 0;
+                        if (gainNodeRef.current && audioContextRef.current) {
+                            gainNodeRef.current.gain.linearRampToValueAtTime(0, audioContextRef.current.currentTime + 0.1);
+                        }
                     }
                 };
 
@@ -2007,7 +2462,7 @@
                 const displayList = view === 'queue' ? playbackQueue : library.filter(t => t.title.toLowerCase().includes(librarySearchQuery.toLowerCase()) || (t.artist && t.artist.toLowerCase().includes(librarySearchQuery.toLowerCase())));
 
                 // Virtual Scroll Setup
-                const containerHeight = Math.max(window.innerHeight - 380, 400);
+                const containerHeight = Math.max(window.innerHeight - 340, 300);
                 const OVERSCAN = 5;
                 const visibleCount = Math.ceil(containerHeight / ROW_HEIGHT) + OVERSCAN * 2;
                 const startIdx = Math.max(0, Math.floor(vsScrollTop / ROW_HEIGHT) - OVERSCAN);
@@ -2029,7 +2484,7 @@
                                         <div className="w-8 h-8 rounded-lg bg-discord-blurple text-white flex items-center justify-center shadow-sm">
                                             <i className="fa-solid fa-compact-disc"></i>
                                         </div>
-                                        <h1 className="text-xl font-bold tracking-tight text-discord-text">Local Player</h1>
+                                        <h1 className="text-xl font-bold tracking-tight text-discord-text">ChakrasPlayer</h1>
                                     </div>
 
                                     <nav className="px-3 flex flex-col gap-1 mb-6">
@@ -2060,14 +2515,18 @@
                                         </div>
                                         <div onClick={() => setView('ai-assistant')} className={`flex items-center gap-4 px-3 py-2.5 rounded-md cursor-pointer transition-colors ${view === 'ai-assistant' ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-purple-400 font-semibold border border-purple-500/20' : 'text-discord-muted hover:bg-discord-tertiary/50 hover:text-discord-text'}`}>
                                             <i className="fa-solid fa-wand-magic-sparkles w-5 text-center"></i>
-                                            <span className="text-sm">Guru IA</span>
+                                            <span className="text-sm">Asistente IA</span>
                                         </div>
                                         <div onClick={() => setView('downloads')} className={`flex items-center gap-4 px-3 py-2.5 rounded-md cursor-pointer transition-colors ${view === 'downloads' ? 'bg-discord-secondary text-discord-text font-semibold' : 'text-discord-muted hover:bg-discord-tertiary/50 hover:text-discord-text'}`}>
                                             <i className="fa-solid fa-download w-5 text-center"></i>
                                             <span className="text-sm">Downloads</span>
-                                            {Object.keys(ytDownloadProgress).length > 0 && (
-                                                <span className="ml-auto w-5 h-5 bg-[#FF0000] text-white text-[10px] flex items-center justify-center rounded-full animate-pulse">{Object.keys(ytDownloadProgress).length}</span>
+                                            {(Object.keys(ytDownloadProgress).length + batchDownloadQueue.length) > seenDownloadsCount && (
+                                                <span className="ml-auto w-5 h-5 bg-[#FF0000] text-white text-[10px] flex items-center justify-center rounded-full animate-pulse">{(Object.keys(ytDownloadProgress).length + batchDownloadQueue.length) - seenDownloadsCount}</span>
                                             )}
+                                        </div>
+                                        <div onClick={() => setView('batch-import')} className={`flex items-center gap-4 px-3 py-2.5 rounded-md cursor-pointer transition-colors ${view === 'batch-import' ? 'bg-discord-blurple/20 text-discord-blurple font-semibold border border-discord-blurple/20' : 'text-discord-muted hover:bg-discord-tertiary/50 hover:text-discord-text'}`}>
+                                            <i className="fa-solid fa-file-import w-5 text-center"></i>
+                                            <span className="text-sm">Importador por Lotes</span>
                                         </div>
                                     </nav>
 
@@ -2085,29 +2544,19 @@
                                             <p className="text-[11px] text-discord-muted truncate">Checking local files...</p>
                                         </div>
                                     )}
-                                    {newVersionAvailable && (
-                                        <div className="mt-auto pt-6 border-t border-white/5 flex flex-col gap-2">
-                                            <button
-                                                onClick={() => window.location.reload()}
-                                                className="w-full flex items-center justify-center gap-3 px-5 py-3 rounded-xl bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/20 text-green-400 text-xs font-bold hover:from-green-500/20 hover:to-emerald-500/20 transition-all group"
-                                            >
-                                                <i className="fa-solid fa-bolt animate-pulse"></i>
-                                                Nueva Versión Disponible
-                                            </button>
-                                            <div className="px-5 text-[10px] text-discord-muted uppercase tracking-widest font-bold">ChakrasPlayer {CURRENT_VERSION}</div>
-                                        </div>
-                                    )}
+                                    {/* Versión removida por petición del usuario */}
                                 </aside>
 
                                 <audio ref={audioTagRef} id="engine-audio-tag" style={{ display: 'none' }}></audio>
+                                <audio ref={audioTagRef2} id="engine-audio-tag-2" style={{ display: 'none' }}></audio>
 
                                 {/* Main Content */}
-                                <main className="flex flex-col glass-panel relative h-full mx-2 rounded-t-xl overflow-y-auto overflow-x-hidden">
+                                <main className="flex flex-col glass-panel relative h-full mx-2 rounded-t-xl overflow-hidden">
 
                                     {/* Sticky Header */}
                                     <header className="sticky top-0 z-30 flex justify-between items-center px-8 py-5 glass-panel border-b border-white/5">
                                         <h2 className="text-2xl font-bold tracking-tight capitalize">
-                                            {view === 'songs' ? 'My Local Library' : view === 'queue' ? 'Playback Queue' : view === 'lyrics' ? 'Now Playing Lyrics' : view === 'albums' ? 'Albums' : view === 'artists' ? 'Artists' : view === 'playlists' ? 'Smart Playlists' : view === 'searchYt' ? 'Discover Music' : view === 'downloads' ? 'Download Queue' : 'Analytics'}
+                                            {view === 'songs' ? 'My Local Library' : view === 'queue' ? 'Playback Queue' : view === 'lyrics' ? 'Now Playing Lyrics' : view === 'albums' ? 'Albums' : view === 'artists' ? 'Artists' : view === 'playlists' ? 'Smart Playlists' : view === 'searchYt' ? 'Discover Music' : view === 'downloads' ? 'Download Queue' : view === 'batch-import' ? 'Importador por Lotes' : 'Analytics'}
                                         </h2>
                                         <div className="flex items-center gap-3">
                                             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${isServerConnected ? 'bg-green-500/10 text-green-500 border-green-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20 animate-pulse'}`}>
@@ -2196,7 +2645,7 @@
 
                                                         <div
                                                             className="flex-1 overflow-y-auto relative custom-scrollbar scroll-smooth"
-                                                            style={{ height: 'calc(100vh - 380px)', minHeight: '400px' }}
+                                                            style={{ height: 'calc(100vh - 340px)', minHeight: '300px' }}
                                                             onScroll={e => setVsScrollTop(e.currentTarget.scrollTop)}
                                                         >
                                                             <div style={{ height: `${displayList.length * ROW_HEIGHT}px`, width: '100%', pointerEvents: 'none' }} />
@@ -2215,9 +2664,10 @@
 
                                                                     return (
                                                                         <div
-                                                                            key={track.id + idx}
-                                                                            onContextMenu={(e) => view === 'songs' && openContextMenu(e, track)}
+                                                                            key={track.id || track.videoId || `virt-${idx}`}
+                                                                            onContextMenu={(e) => view === 'songs' && !track.isDownloading && openContextMenu(e, track)}
                                                                             onDoubleClick={() => {
+                                                                                if (track.isDownloading) return;
                                                                                 if (view === 'songs') {
                                                                                     const absoluteIndex = library.findIndex(t => t.id === track.id);
                                                                                     if (absoluteIndex !== -1) selectTrack(absoluteIndex, true);
@@ -2225,34 +2675,44 @@
                                                                                     selectTrack(idx, false);
                                                                                 }
                                                                             }}
-                                                                            className={`grid grid-cols-[48px_1fr_minmax(120px,25%)_80px] items-center border-b border-white/5 hover:bg-white/5 cursor-pointer group transition-colors duration-150 ${isActive ? 'bg-discord-blurple/10 shadow-[inset_4px_0_0_var(--color-blurple)]' : ''}`}
+                                                                            className={`grid grid-cols-[48px_1fr_minmax(120px,25%)_80px] items-center border-b border-white/5 hover:bg-white/5 ${track.isDownloading ? 'cursor-wait' : 'cursor-pointer'} group transition-colors duration-150 ${isActive ? 'bg-discord-blurple/10 shadow-[inset_4px_0_0_var(--color-blurple)]' : ''}`}
                                                                             style={{
                                                                                 height: `${ROW_HEIGHT}px`,
-                                                                                background: isActive ? `linear-gradient(to right, var(--color-vibrant-dark) 0%, var(--color-vibrant-dark) ${durationRef.current ? (currentProgressRef.current / durationRef.current) * 100 : 0}%, transparent ${durationRef.current ? (currentProgressRef.current / durationRef.current) * 100 : 0}%, transparent 100%)` : ''
+                                                                                background: track.isDownloading && ytDownloadProgress[track.videoId] 
+                                                                                    ? `linear-gradient(to right, rgba(88, 101, 242, 0.15) 0%, rgba(88, 101, 242, 0.15) ${ytDownloadProgress[track.videoId]}%, transparent ${ytDownloadProgress[track.videoId]}%, transparent 100%)`
+                                                                                    : isActive ? `linear-gradient(to right, var(--color-vibrant-dark) 0%, var(--color-vibrant-dark) ${durationRef.current ? (currentProgressRef.current / durationRef.current) * 100 : 0}%, transparent ${durationRef.current ? (currentProgressRef.current / durationRef.current) * 100 : 0}%, transparent 100%)` : ''
                                                                             }}
                                                                         >
                                                                             <div className="text-center text-xs text-discord-muted group-hover:text-white relative">
                                                                                 <span className={isActive ? 'text-discord-blurple group-hover:hidden' : 'group-hover:hidden'}>
-                                                                                    {isActive && isPlaying ? <i className="fa-solid fa-volume-high animate-pulse"></i> : idx + 1}
+                                                                                    {track.isDownloading ? <i className="fa-solid fa-cloud-arrow-down animate-pulse text-discord-blurple"></i> : (isActive && isPlaying ? <i className="fa-solid fa-volume-high animate-pulse"></i> : idx + 1)}
                                                                                 </span>
-                                                                                <i className="fa-solid fa-play hidden group-hover:block absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white"
-                                                                                    onClick={(e) => { e.stopPropagation(); view === 'songs' ? selectTrack(library.findIndex(t => t.id === track.id), true) : selectTrack(idx, false); }}></i>
+                                                                                {!track.isDownloading && (
+                                                                                    <i className="fa-solid fa-play hidden group-hover:block absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white"
+                                                                                        onClick={(e) => { e.stopPropagation(); view === 'songs' ? selectTrack(library.findIndex(t => t.id === track.id), true) : selectTrack(idx, false); }}></i>
+                                                                                )}
                                                                             </div>
 
                                                                             <div className="px-4 flex items-center gap-3 overflow-hidden">
                                                                                 {track.coverUrl ? (
-                                                                                    <img src={track.coverUrl} className="w-8 h-8 rounded shadow-sm object-cover flex-shrink-0" alt="" />
+                                                                                    track.coverUrl.startsWith('gradient:') ? (
+                                                                                        <div className={`w-8 h-8 rounded shadow-sm flex-shrink-0 ${track.isDownloading ? 'animate-pulse opacity-50' : ''}`} style={{ background: `linear-gradient(135deg, ${track.coverUrl.replace('gradient:', '').split('-')[0]}, ${track.coverUrl.replace('gradient:', '').split('-')[1]})` }}></div>
+                                                                                    ) : (
+                                                                                        <img src={track.coverUrl.startsWith('/') ? `http://127.0.0.1:5888${track.coverUrl}${track.coverUrl.includes('?') ? '&' : '?'}s=100` : track.coverUrl} onError={(e) => { e.target.src = 'favicon.ico'; }} className={`w-8 h-8 rounded shadow-sm object-cover flex-shrink-0 ${track.isDownloading ? 'animate-pulse opacity-50' : ''}`} alt="" />
+                                                                                    )
                                                                                 ) : (
                                                                                     <div className="w-8 h-8 rounded bg-discord-tertiary flex items-center justify-center text-[10px] flex-shrink-0" style={{ background: track.artist !== 'Unknown Artist' ? `linear-gradient(135deg, #${(track.artist.length * 12345).toString(16).slice(0, 6).padStart(6, 'f')}, #${(track.artist.length * 67890).toString(16).slice(0, 6).padStart(6, '3')})` : '' }}>
-                                                                                        <i className="fa-solid fa-music opacity-50"></i>
+                                                                                        <i className={`fa-solid fa-music opacity-50 ${track.isDownloading ? 'animate-bounce' : ''}`}></i>
                                                                                     </div>
                                                                                 )}
                                                                                 <div className="flex flex-col min-w-0">
                                                                                     <div className="flex items-center gap-2">
-                                                                                        <span className={`text-sm font-medium truncate ${isActive ? 'text-discord-blurple' : 'text-discord-text'}`}>
+                                                                                        <span className={`text-sm font-medium truncate ${isActive ? 'text-discord-blurple' : 'text-discord-text'} ${track.isDownloading ? 'italic opacity-70' : ''}`}>
                                                                                              {track.title ? track.title.replace(/\[.*?(official|music|video|audio|lyric|live|remaster).*?\]|\(.*?(official|music|video|audio|lyric|live|remaster).*?\)/gi, '').trim() : 'Unknown Title'}
                                                                                         </span>
-                                                                                        {currentlyEnriching === track.id ? (
+                                                                                        {track.isDownloading ? (
+                                                                                            <span className="text-[10px] text-discord-blurple font-bold">{ytDownloadProgress[track.videoId] || '0'}%</span>
+                                                                                        ) : currentlyEnriching === track.id ? (
                                                                                             <i className="fa-solid fa-wand-magic-sparkles text-[10px] text-discord-blurple animate-pulse"></i>
                                                                                         ) : enrichmentQueue.includes(track.id) ? (
                                                                                             <i className="fa-solid fa-hourglass-half text-[10px] text-yellow-500/50"></i>
@@ -2260,30 +2720,32 @@
                                                                                             <i className="fa-solid fa-circle-check text-[10px] text-green-500/30 text-opacity-80"></i>
                                                                                         )}
                                                                                     </div>
-                                                                                    <span className="text-[11px] text-discord-muted truncate">{track.artist}</span>
+                                                                                    <span className={`text-[11px] text-discord-muted truncate ${track.isDownloading ? 'italic opacity-70' : ''}`}>{track.artist}</span>
                                                                                 </div>
                                                                             </div>
 
-                                                                            <div className="px-4 hidden md:block text-xs text-discord-muted truncate">
-                                                                                {track.album && track.album !== 'Unknown Album' && track.album !== 'Descargas de YT' ? track.album : '-'}
+                                                                            <div className={`px-4 hidden md:block text-xs text-discord-muted truncate ${track.isDownloading ? 'italic opacity-50' : ''}`}>
+                                                                                {track.isDownloading ? 'Descargando...' : (track.album && track.album !== 'Unknown Album' && track.album !== 'Descargas de YT' ? track.album : '-')}
                                                                             </div>
 
                                                                             <div className="px-4 flex items-center justify-end gap-3">
-                                                                                <button
-                                                                                    onClick={(e) => {
-                                                                                        e.stopPropagation();
-                                                                                        const newRating = track.rating === 1 ? 0 : 1;
-                                                                                        window.StorageApi.rateTrack(track.id, newRating);
-                                                                                        setLibrary(prev => prev.map(t => t.id === track.id ? { ...t, rating: newRating } : t));
-                                                                                        if (view === 'queue') {
-                                                                                            setPlaybackQueue(prev => prev.map(t => t.id === track.id ? { ...t, rating: newRating } : t));
-                                                                                        }
-                                                                                    }}
-                                                                                    className={`text-xs transition-colors ${track.rating === 1 ? 'text-red-500' : 'text-discord-muted hover:text-red-500'}`}
-                                                                                >
-                                                                                    <i className={track.rating === 1 ? "fa-solid fa-heart" : "fa-regular fa-heart"}></i>
-                                                                                </button>
-                                                                                <span className="text-xs text-discord-muted font-mono">{formatTime(track.duration)}</span>
+                                                                                {!track.isDownloading && (
+                                                                                    <button
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            const newRating = track.rating === 1 ? 0 : 1;
+                                                                                            window.StorageApi.rateTrack(track.id, newRating);
+                                                                                            setLibrary(prev => prev.map(t => t.id === track.id ? { ...t, rating: newRating } : t));
+                                                                                            if (view === 'queue') {
+                                                                                                setPlaybackQueue(prev => prev.map(t => t.id === track.id ? { ...t, rating: newRating } : t));
+                                                                                            }
+                                                                                        }}
+                                                                                        className={`transition-colors p-1 rounded-full ${track.rating === 1 ? 'text-red-500 bg-red-500/10' : 'text-discord-muted hover:text-red-500'}`}
+                                                                                    >
+                                                                                        <i className={track.rating === 1 ? "fa-solid fa-heart" : "fa-regular fa-heart"}></i>
+                                                                                    </button>
+                                                                                )}
+                                                                                <span className="text-xs text-discord-muted font-mono">{track.isDownloading ? '-' : formatTime(track.duration)}</span>
                                                                             </div>
                                                                         </div>
                                                                     );
@@ -2449,7 +2911,11 @@
                                                                     setView('queue');
                                                                 }}>
                                                                 {cover ? (
-                                                                    <img src={cover} className="w-full aspect-square object-cover rounded shadow mb-3 group-hover:shadow-md transition-shadow border border-discord-border/50" alt={album} />
+                                                                    cover.startsWith('gradient:') ? (
+                                                                        <div className="w-full aspect-square rounded shadow mb-3 group-hover:shadow-md transition-shadow border border-discord-border/50" style={{ background: `linear-gradient(135deg, ${cover.replace('gradient:', '').split('-')[0]}, ${cover.replace('gradient:', '').split('-')[1]})` }}></div>
+                                                                    ) : (
+                                                                        <img src={cover.startsWith('/') ? `http://127.0.0.1:5888${cover}${cover.includes('?') ? '&' : '?'}s=400` : cover} className="w-full aspect-square object-cover rounded shadow mb-3 group-hover:shadow-md transition-shadow border border-discord-border/50" alt={album} />
+                                                                    )
                                                                 ) : (
                                                                     <div className="w-full aspect-square bg-discord-tertiary rounded flex items-center justify-center mb-3 text-discord-muted shadow border border-discord-border/50"><i className="fa-solid fa-compact-disc text-4xl"></i></div>
                                                                 )}
@@ -2483,7 +2949,11 @@
                                                                 }}>
                                                                 <div className="w-32 h-32 md:w-40 md:h-40 relative rounded-full mb-4 shadow-sm group-hover:shadow-lg transition-all transform group-hover:-translate-y-1">
                                                                     {cover ? (
-                                                                        <img src={cover} className="w-full h-full object-cover rounded-full border border-discord-border/50" alt={artist} />
+                                                                        cover.startsWith('gradient:') ? (
+                                                                            <div className="w-full h-full rounded-full border border-discord-border/50" style={{ background: `linear-gradient(135deg, ${cover.replace('gradient:', '').split('-')[0]}, ${cover.replace('gradient:', '').split('-')[1]})` }}></div>
+                                                                        ) : (
+                                                                            <img src={cover.startsWith('/') ? `http://127.0.0.1:5888${cover}${cover.includes('?') ? '&' : '?'}s=400` : cover} className="w-full h-full object-cover rounded-full border border-discord-border/50" alt={artist} />
+                                                                        )
                                                                     ) : (
                                                                         <div className="w-full h-full bg-discord-tertiary rounded-full flex items-center justify-center text-discord-muted border border-discord-border/50"><i className="fa-solid fa-user text-4xl"></i></div>
                                                                     )}
@@ -2520,7 +2990,7 @@
                                                         </div>
                                                         <h3 className="text-xl font-bold text-discord-text mb-1 tracking-tight">Recently Added</h3>
                                                         <p className="text-sm text-discord-muted mb-4">The newest tracks added to your local library.</p>
-                                                        <p className="text-xs font-semibold text-discord-blurple bg-discord-blurple/10 inline-block px-2 py-1 rounded">Auto-generated • Top 50</p>
+                                                        <p className="text-xs font-semibold text-discord-blurple bg-discord-blurple/10 inline-block px-2 py-1 rounded">Auto-generated â€¢ Top 50</p>
                                                     </div>
 
                                                     {/* Smart Playlist: Most Played */}
@@ -2540,26 +3010,31 @@
                                                         </div>
                                                         <h3 className="text-xl font-bold text-discord-text mb-1 tracking-tight">Most Played</h3>
                                                         <p className="text-sm text-discord-muted mb-4">Your absolute favorite tracks on repeat.</p>
-                                                        <p className="text-xs font-semibold text-[#ED4245] bg-[#ED4245]/10 inline-block px-2 py-1 rounded">Auto-generated • Top 50</p>
+                                                        <p className="text-xs font-semibold text-[#ED4245] bg-[#ED4245]/10 inline-block px-2 py-1 rounded">Auto-generated â€¢ Top 50</p>
                                                     </div>
                                                 </div>
                                             )
                                         }
 
                                         {view === 'ai-assistant' && (
-                                            <div className="flex flex-col h-[calc(100vh-140px)] w-full max-w-4xl mx-auto rounded-2xl overflow-hidden glass-panel border border-white/10 shadow-2xl relative">
+                                            <div className="flex flex-col h-[calc(100vh-280px)] w-full max-w-4xl mx-auto rounded-2xl overflow-hidden glass-panel border border-white/10 shadow-2xl relative">
                                                 {/* Encabezado IA */}
                                                 <div className="bg-gradient-to-r from-purple-600/30 to-pink-600/30 backdrop-blur-md p-4 flex items-center gap-4 border-b border-white/10 z-10 shrink-0">
                                                     <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-purple-500 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-purple-500/30">
                                                         <i className="fa-solid fa-brain"></i>
                                                     </div>
                                                     <div>
-                                                        <h2 className="text-lg font-bold text-white tracking-tight">Chakras Guru</h2>
-                                                        <p className="text-xs text-purple-200/70 font-medium tracking-wide">AI Music Assistant • Local Offline Mode</p>
+                                                        <h2 className="text-lg font-bold text-white tracking-tight">ChakrasPlayer IA</h2>
+                                                        <div className="flex items-center gap-2">
+                                                            <p className="text-xs text-purple-200/70 font-medium tracking-wide">AI Music Assistant • Local Offline Mode</p>
+                                                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${aiCallCount >= 1400 ? 'bg-red-500/20 text-red-400' : 'bg-white/10 text-white/60'}`}>
+                                                                {aiCallCount}/1500 llamadas hoy
+                                                            </span>
+                                                        </div>
                                                     </div>
                                                 </div>
 
-                                                {/* Área de Mensajes */}
+                                                {/* írea de Mensajes */}
                                                 <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent flex flex-col gap-6" style={{ scrollBehavior: 'smooth' }}>
                                                     {aiMessages.map((msg, idx) => (
                                                         <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -2646,20 +3121,142 @@
 
                                         {view === 'analytics' && <AnalyticsDashboard library={library} />}
 
+                                        {view === 'batch-import' && (
+                                            <div className="flex flex-col gap-6 w-full max-w-5xl mx-auto h-[calc(100vh-280px)] overflow-hidden">
+                                                <div className="bg-discord-secondary/30 p-8 rounded-2xl border border-white/5 shadow-xl relative overflow-hidden">
+                                                    <div className="absolute top-0 right-0 w-64 h-64 bg-discord-blurple/5 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none"></div>
+                                                    
+                                                    <div className="flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
+                                                        <div className="flex-1">
+                                                            <h3 className="text-2xl font-bold mb-2 flex items-center gap-3">
+                                                                <i className="fa-solid fa-wand-magic-sparkles text-discord-blurple"></i>
+                                                                Enriquecimiento por Lotes
+                                                            </h3>
+                                                            <p className="text-discord-muted leading-relaxed">
+                                                                Convierte listas de nombres o archivos locales (WAV/FLAC) en MP3s de alta calidad con metadatos y portadas.
+                                                            </p>
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-4 shrink-0">
+                                                            <label className="cursor-pointer bg-discord-tertiary hover:bg-[#4e5058] text-discord-text text-sm font-bold py-3 px-6 rounded-xl shadow-sm transition-all flex items-center gap-2 border border-white/5">
+                                                                <i className="fa-solid fa-file-code"></i>
+                                                                Subir Lista (TXT/JSON)
+                                                                <input type="file" accept=".txt,.json" onChange={handleBatchUpload} className="hidden" />
+                                                            </label>
+                                                            <button 
+                                                                onClick={async () => {
+                                                                    const path = await window.pywebview.api.pick_folder();
+                                                                    if (path) {
+                                                                        setIsScanning(true);
+                                                                        try {
+                                                                            const res = await window.pywebview.api.scan_folder(path);
+                                                                            if (res.status === 'success') {
+                                                                                const songList = res.tracks.map(t => ({
+                                                                                    artist: t.artist,
+                                                                                    title: t.title
+                                                                                }));
+                                                                                setBatchDownloadQueue(prev => [...prev, ...songList]);
+                                                                                alert(`Escaneado: ${songList.length} canciones añadidas a la cola.`);
+                                                                            }
+                                                                        } catch (e) {
+                                                                            alert("Error al escanear carpeta: " + e.message);
+                                                                        } finally {
+                                                                            setIsScanning(false);
+                                                                        }
+                                                                    }
+                                                                }}
+                                                                disabled={isScanning}
+                                                                className="bg-discord-blurple hover:bg-[#4752C4] text-white text-sm font-bold py-3 px-6 rounded-xl shadow-lg transition-all flex items-center gap-2"
+                                                            >
+                                                                {isScanning ? <i className="fa-solid fa-circle-notch fa-spin"></i> : <i className="fa-solid fa-folder-tree"></i>}
+                                                                Escanear Carpeta (WAV/FLAC)
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex-1 overflow-hidden flex flex-col gap-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <h4 className="text-xs font-bold text-discord-muted uppercase tracking-widest">Cola de Procesamiento ({batchDownloadQueue.length})</h4>
+                                                        {batchDownloadQueue.length > 0 && (
+                                                            <button 
+                                                                onClick={() => setBatchDownloadQueue([])}
+                                                                className="text-xs font-bold text-red-500 hover:underline px-2 py-1"
+                                                            >
+                                                                Limpiar Cola
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    
+                                                    <div className="flex-1 overflow-y-auto custom-scrollbar bg-black/20 rounded-xl border border-white/5 p-4 flex flex-col gap-2">
+                                                        {batchDownloadQueue.length === 0 ? (
+                                                            <div className="h-full flex flex-col items-center justify-center text-discord-muted opacity-40 py-20">
+                                                                <i className="fa-solid fa-layer-group text-6xl mb-4"></i>
+                                                                <p className="text-lg font-bold">La cola está vacía</p>
+                                                                <p className="text-sm">Usa los botones superiores para importar canciones</p>
+                                                            </div>
+                                                        ) : (
+                                                            batchDownloadQueue.map((item, idx) => (
+                                                                <div key={idx} className={`p-4 rounded-xl border flex items-center gap-4 transition-all ${idx === 0 ? 'bg-discord-blurple/10 border-discord-blurple/30 shadow-inner' : 'bg-discord-secondary/20 border-white/5'}`}>
+                                                                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${idx === 0 ? 'bg-discord-blurple text-white shadow-lg animate-pulse' : 'bg-discord-tertiary text-discord-muted'}`}>
+                                                                        {idx === 0 ? <i className="fa-solid fa-gear fa-spin"></i> : <span className="font-bold text-xs">{idx + 1}</span>}
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <p className={`text-sm font-bold truncate ${idx === 0 ? 'text-discord-text' : 'text-discord-muted'}`}>{item.title}</p>
+                                                                            {idx === 0 && <span className="bg-discord-blurple text-white text-[9px] px-1.5 py-0.5 rounded font-black uppercase">En Proceso</span>}
+                                                                        </div>
+                                                                        <p className="text-xs text-discord-muted truncate">{item.artist}</p>
+                                                                    </div>
+                                                                    {idx > 0 && (
+                                                                        <button 
+                                                                            onClick={() => setBatchDownloadQueue(prev => prev.filter((_, i) => i !== idx))}
+                                                                            className="w-8 h-8 rounded-full hover:bg-red-500/10 text-discord-muted hover:text-red-500 transition-colors flex items-center justify-center"
+                                                                        >
+                                                                            <i className="fa-solid fa-xmark"></i>
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {batchDownloadQueue.length > 0 && !ytDownloadProgress['batch-active'] && (
+                                                    <div className="bg-discord-secondary/50 p-4 border-t border-white/5 rounded-b-xl flex items-center justify-between">
+                                                        <div className="flex items-center gap-3 text-discord-muted">
+                                                            <i className="fa-solid fa-circle-info text-discord-blurple"></i>
+                                                            <p className="text-xs">ChakrasPlayer buscará la mejor versión en YouTube y aplicará metadatos automáticamente.</p>
+                                                        </div>
+                                                        {/* This button isn't strictly needed if the loop starts automatically, but it's good for UX */}
+                                                        <p className="text-xs font-bold text-discord-blurple uppercase tracking-tighter animate-pulse">
+                                                            El procesamiento comenzará automáticamente...
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
                                         {
                                             view === 'downloads' && (
-                                                <div className="flex flex-col gap-6 w-full max-w-4xl">
+                                                <div className="flex flex-col gap-6 w-full h-[calc(100vh-280px)] overflow-y-auto custom-scrollbar pr-4">
                                                     <div className="flex items-center justify-between mb-4">
                                                         <h3 className="text-xl font-bold flex items-center gap-3">
                                                             <i className="fa-solid fa-download text-discord-blurple"></i>
                                                             Active Downloads
                                                         </h3>
-                                                        <span className="text-xs font-semibold bg-discord-secondary px-3 py-1 rounded-full text-discord-muted">
-                                                            {Object.keys(ytDownloadProgress).length} Items in Queue
-                                                        </span>
+                                                        <div className="flex items-center gap-4">
+                                                            <label className="cursor-pointer bg-discord-blurple hover:bg-[#4752C4] text-white text-xs font-bold py-1.5 px-4 rounded-full shadow-sm transition-all flex items-center gap-2">
+                                                                <i className="fa-solid fa-file-import"></i>
+                                                                Batch Download (.txt/.json)
+                                                                <input type="file" accept=".txt,.json" onChange={handleBatchUpload} className="hidden" />
+                                                            </label>
+                                                            <span className="text-xs font-semibold bg-discord-secondary px-3 py-1 rounded-full text-discord-muted">
+                                                                {Object.keys(ytDownloadProgress).length + batchDownloadQueue.length} Items in Queue
+                                                            </span>
+                                                        </div>
                                                     </div>
 
-                                                    {Object.keys(ytDownloadProgress).length === 0 ? (
+                                                    {Object.keys(ytDownloadProgress).length === 0 && batchDownloadQueue.length === 0 ? (
                                                         <div className="flex flex-col items-center justify-center py-20 bg-black/20 rounded-xl border border-white/5">
                                                             <i className="fa-solid fa-cloud-arrow-down text-5xl mb-4 opacity-20"></i>
                                                             <p className="text-discord-muted font-medium">No active downloads at the moment.</p>
@@ -2667,11 +3264,11 @@
                                                         </div>
                                                     ) : (
                                                         <div className="flex flex-col gap-3">
+                                                            {/* Manual Downloads Progress */}
                                                             {Object.entries(ytDownloadProgress).map(([videoId, progress]) => (
                                                                 <div key={videoId} className="glass-panel p-4 flex items-center gap-4 border border-white/5 shadow-md">
                                                                     <div className="w-12 h-12 bg-discord-tertiary rounded flex items-center justify-center relative overflow-hidden">
                                                                         <i className="fa-solid fa-music text-white/30"></i>
-                                                                        {/* Optional: Add mini thumbnail if available */}
                                                                     </div>
                                                                     <div className="flex-1 min-w-0">
                                                                         <div className="flex justify-between items-center mb-2">
@@ -2690,6 +3287,29 @@
                                                                     </div>
                                                                 </div>
                                                             ))}
+                                                            
+                                                            {/* Batch Queue Section */}
+                                                            {batchDownloadQueue.length > 0 && (
+                                                                <div className="mt-4">
+                                                                    <h4 className="text-xs font-bold text-discord-muted uppercase tracking-wider mb-2">Batch Processing Queue ({batchDownloadQueue.length})</h4>
+                                                                    <div className="flex flex-col gap-2">
+                                                                        {batchDownloadQueue.map((item, idx) => (
+                                                                            <div key={idx} className={`p-3 rounded-lg border border-white/5 flex items-center gap-3 ${idx === 0 ? 'bg-discord-blurple/10 border-discord-blurple/20' : 'bg-black/10'}`}>
+                                                                                <div className="w-8 h-8 rounded bg-discord-tertiary flex items-center justify-center">
+                                                                                    {idx === 0 ? <i className="fa-solid fa-spinner fa-spin text-discord-blurple"></i> : <i className="fa-solid fa-hourglass-start text-discord-muted"></i>}
+                                                                                </div>
+                                                                                <div className="flex-1 min-w-0">
+                                                                                    <p className="text-sm font-semibold truncate">{item.title}</p>
+                                                                                    <p className="text-[10px] text-discord-muted truncate">{item.artist}</p>
+                                                                                </div>
+                                                                                {idx === 0 && (
+                                                                                    <span className="text-[10px] font-bold text-discord-blurple animate-pulse">SOLVING & DOWNLOADING...</span>
+                                                                                )}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>
@@ -2908,6 +3528,26 @@
                                                                     {audioDeviceId ? 'Change Output Device...' : 'Select Output Device'}
                                                                 </button>
                                                             </section>
+
+                                                            {/* Mantenimiento de Biblioteca */}
+                                                            <section className="bg-red-500/5 p-6 rounded-lg border border-red-500/20">
+                                                                <h3 className="text-lg font-bold text-red-500 mb-2 flex items-center gap-2"><i className="fa-solid fa-broom"></i> Mantenimiento</h3>
+                                                                <p className="text-sm text-discord-muted mb-4">Acciones para optimizar la base de datos y liberar recursos.</p>
+                                                                <div className="flex flex-wrap gap-4">
+                                                                    <button onClick={clearLibrary} className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white font-bold py-2 px-6 rounded-lg border border-red-500/50 transition-all shadow-sm">
+                                                                        Limpiar Toda la Biblioteca
+                                                                    </button>
+                                                                    <button onClick={async () => {
+                                                                        const tracks = await window.StorageApi.getAllTracks();
+                                                                        const cleaned = tracks.map(t => ({ ...t, coverUrl: t.coverUrl && t.coverUrl.startsWith('data:') ? null : t.coverUrl }));
+                                                                        await window.StorageApi.saveTracks(cleaned);
+                                                                        setLibrary(cleaned);
+                                                                        alert("Optimización completada. Se han eliminado las portadas pesadas. Realiza un escaneo para recuperar las miniaturas optimizadas.");
+                                                                    }} className="bg-discord-blurple/10 hover:bg-discord-blurple text-discord-blurple hover:text-white font-bold py-2 px-6 rounded-lg border border-discord-blurple/50 transition-all shadow-sm">
+                                                                        Purgar Memoria (Limpiar Portadas Pesadas)
+                                                                    </button>
+                                                                </div>
+                                                            </section>
                                                         </div>
                                                     )}
                                                 </div>
@@ -2930,7 +3570,8 @@
                                             </div>
                                         ) : (
                                             <div className="flex flex-col gap-2">
-                                                {playbackQueue.map((track, idx) => {
+                                                {playbackQueue.slice(currentTrackIndex, currentTrackIndex + 50).map((track, relativeIdx) => {
+                                                    const idx = currentTrackIndex + relativeIdx;
                                                     const isActive = idx === currentTrackIndex;
                                                     const isDragging = idx === draggedIdx;
                                                     return (
@@ -2949,7 +3590,15 @@
                                                             onClick={() => selectTrack(idx, false)}
                                                         >
                                                             <div className="w-10 h-10 rounded-md shrink-0 bg-discord-tertiary overflow-hidden flex items-center justify-center shadow-sm relative">
-                                                                {track.coverUrl ? <img src={track.coverUrl} className="w-full h-full object-cover group-hover:opacity-75 transition-opacity" /> : <i className="fa-solid fa-music text-discord-muted"></i>}
+                                                                {track.coverUrl ? (
+                                                                    track.coverUrl.startsWith('gradient:') ? (
+                                                                        <div className="w-full h-full group-hover:opacity-75 transition-opacity" style={{ background: `linear-gradient(135deg, ${track.coverUrl.replace('gradient:', '').split('-')[0]}, ${track.coverUrl.replace('gradient:', '').split('-')[1]})` }}></div>
+                                                                    ) : (
+                                                                        <img src={track.coverUrl.startsWith('/') ? `http://127.0.0.1:5888${track.coverUrl}${track.coverUrl.includes('?') ? '&' : '?'}s=100` : track.coverUrl} onError={(e) => { e.target.src = 'favicon.ico'; e.target.onerror = null; }} className="w-full h-full object-cover group-hover:opacity-75 transition-opacity" />
+                                                                    )
+                                                                ) : (
+                                                                    <i className="fa-solid fa-music text-discord-muted"></i>
+                                                                )}
                                                                 {isActive && isPlaying && (
                                                                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center gap-0.5">
                                                                         <div className="w-1 bg-white h-1/2 animate-[bounce-bars_1s_infinite]"></div>
@@ -2981,7 +3630,11 @@
                                     {activeTrack && (
                                         <>
                                             {activeTrack.coverUrl ? (
-                                                <img src={activeTrack.coverUrl} className="w-14 h-14 rounded shadow-sm object-cover border border-discord-secondary" alt="cover" />
+                                                activeTrack.coverUrl.startsWith('gradient:') ? (
+                                                    <div className="w-14 h-14 rounded shadow-sm border border-discord-secondary flex-shrink-0" style={{ background: `linear-gradient(135deg, ${activeTrack.coverUrl.replace('gradient:', '').split('-')[0]}, ${activeTrack.coverUrl.replace('gradient:', '').split('-')[1]})` }}></div>
+                                                ) : (
+                                                    <img src={activeTrack.coverUrl.startsWith('/') ? `http://127.0.0.1:5888${activeTrack.coverUrl}${activeTrack.coverUrl.includes('?') ? '&' : '?'}s=400` : activeTrack.coverUrl} onError={(e) => { e.target.src = 'favicon.ico'; e.target.onerror = null; }} className="w-14 h-14 rounded shadow-sm object-cover border border-discord-secondary" alt="cover" />
+                                                )
                                             ) : (
                                                 <div className={`w-14 h-14 rounded flex items-center justify-center border border-white/5 ${currentlyEnriching === activeTrack.id ? 'skeleton' : 'bg-discord-secondary text-discord-muted border-discord-border/50'}`}>
                                                     <i className="fa-solid fa-music text-xl"></i>
@@ -2992,10 +3645,11 @@
                                                 <span className={`text-xs hover:underline cursor-pointer truncate ${currentlyEnriching === activeTrack.id && activeTrack.artist === 'Unknown Artist' ? 'skeleton w-24 mt-1' : 'text-discord-muted'}`}>{activeTrack.artist}</span>
                                             </div>
                                             <button onClick={() => {
-                                                window.StorageApi.rateTrack(activeTrack.id, activeTrack.rating === 1 ? 0 : 1);
-                                                setPlaybackQueue(playbackQueue.map(t => t.id === activeTrack.id ? { ...t, rating: activeTrack.rating === 1 ? 0 : 1 } : t));
-                                                setLibrary(library.map(t => t.id === activeTrack.id ? { ...t, rating: activeTrack.rating === 1 ? 0 : 1 } : t));
-                                            }} className={`text-xl transition-colors morphing-button ml-2 ${activeTrack.rating === 1 ? 'text-[#ED4245]' : 'text-discord-muted hover:text-discord-text'}`}>
+                                                const newRating = activeTrack.rating === 1 ? 0 : 1;
+                                                window.StorageApi.rateTrack(activeTrack.id, newRating);
+                                                setPlaybackQueue(playbackQueue.map(t => t.id === activeTrack.id ? { ...t, rating: newRating } : t));
+                                                setLibrary(library.map(t => t.id === activeTrack.id ? { ...t, rating: newRating } : t));
+                                            }} className={`text-xl transition-colors morphing-button ml-2 p-1.5 rounded-full ${activeTrack.rating === 1 ? 'text-red-500 bg-red-500/10' : 'text-discord-muted hover:text-discord-text'}`}>
                                                 <i className={`${activeTrack.rating === 1 ? 'fa-solid' : 'fa-regular'} fa-heart`}></i>
                                             </button>
                                         </>
@@ -3005,8 +3659,13 @@
                                 {/* Center: Controls & Progress */}
                                 <div className="flex flex-col items-center justify-center w-1/3 max-w-[500px]">
                                     <div className="flex items-center gap-6 mb-2">
-                                        <button onClick={toggleShuffle} className={`${isShuffle ? 'text-discord-blurple' : 'text-discord-muted'} hover:text-discord-text transition-colors text-sm relative`}>
+                                        <button onClick={toggleShuffle} className={`${isShuffle ? 'text-discord-blurple' : 'text-discord-muted'} hover:text-discord-text transition-colors text-sm relative`} title="Shuffle">
                                             <i className="fa-solid fa-shuffle"></i>
+                                        </button>
+                                        <button onClick={() => setIsMixMode(!isMixMode)} className={`${isMixMode ? 'text-discord-blurple' : 'text-discord-muted'} hover:text-discord-text transition-colors text-sm relative`} title="Mix Mode (Crossfade)">
+                                            <i className="fa-solid fa-wand-magic-sparkles mr-0.5"></i>
+                                            <span className="text-[9px] font-bold">MIX</span>
+                                            {isMixMode && <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-1 h-1 bg-discord-blurple rounded-full"></span>}
                                         </button>
                                         <button onClick={prevTrack} className="text-discord-muted hover:text-discord-text transition-colors text-lg"><i className="fa-solid fa-backward-step"></i></button>
                                         <button
@@ -3050,11 +3709,11 @@
                                         <i className="fa-solid fa-gear"></i>
                                     </button>
                                     <div className="flex items-center gap-2 w-28 pl-2">
-                                        <i className={`fa-solid ${volume === 0 ? 'fa-volume-xmark' : volume < 0.5 ? 'fa-volume-low' : 'fa-volume-high'} text-sm`}></i>
+                                        <i onClick={toggleMute} className={`fa-solid ${isMuted || volume === 0 ? 'fa-volume-xmark text-red-500' : volume < 0.5 ? 'fa-volume-low text-discord-blurple' : 'fa-volume-high text-discord-blurple'} text-sm cursor-pointer hover:scale-110 transition-transform`}></i>
                                         <input
                                             type="range" min="0" max="1" step="0.01" value={volume} onChange={handleVolume}
                                             className="progress-bar w-full"
-                                            style={{ background: `linear-gradient(to right, var(--color-vibrant, var(--color-blurple)) ${volume * 100}%, var(--color-tertiary) ${volume * 100}%)` }}
+                                            style={{ background: `linear-gradient(to right, ${isMuted || volume === 0 ? '#ef4444' : 'var(--color-vibrant, var(--color-blurple))'} ${volume * 100}%, var(--color-tertiary) ${volume * 100}%)` }}
                                         />
                                     </div>
                                 </div>
@@ -3074,7 +3733,7 @@
                                                 Metadatos de la Pista
                                             </h3>
                                             <p className="text-sm text-discord-muted mb-6 leading-relaxed">
-                                                Define cómo quieres que esta pista sea indexada en tu biblioteca de <strong>Anti Gravity</strong>.
+                                                Define cómo quieres que esta pista sea indexada en tu biblioteca de <strong>Chakras IA</strong>.
                                             </p>
 
                                             <div className="space-y-5 mb-8">
@@ -3144,6 +3803,13 @@
                                             </button>
                                             <button onClick={() => openTrimmer(contextMenu.track)} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-discord-text hover:bg-white/5 transition-colors">
                                                 <i className="fa-solid fa-scissors w-4 text-yellow-400"></i>Recortar Audio
+                                            </button>
+                                            <div className="h-[1px] bg-white/5 mx-2 my-1"></div>
+                                            <button onClick={() => replaceFromYoutube(contextMenu.track)} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-discord-text hover:bg-white/5 transition-colors">
+                                                <i className="fa-brands fa-youtube w-4 text-[#FF0000]"></i>Reemplazar desde YT
+                                            </button>
+                                            <button onClick={() => deleteSong(contextMenu.track)} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 transition-colors">
+                                                <i className="fa-solid fa-trash-can w-4 text-red-500"></i>Borrar Canción
                                             </button>
                                         </div>
                                     </div>
