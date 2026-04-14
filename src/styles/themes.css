@@ -1,0 +1,62 @@
+/* src/styles/themes.css */
+:root {
+    --color-bg: #36393F;
+    --color-secondary: #2F3136;
+    --color-tertiary: #202225;
+    --color-blurple: #5865F2;
+    --color-text: #DCDDDE;
+    --color-muted: #72767D;
+    --color-border: #4F545C;
+    --color-vibrant: #5865F2;
+    --color-vibrant-dark: rgba(88, 101, 242, 0.15);
+    --glass-blur: 20px;
+    --glass-saturate: 210%;
+    --glass-opacity: 70%;
+}
+
+[data-theme='midnight'] {
+    --color-bg: #121212;
+    --color-secondary: #0D0D0D;
+    --color-tertiary: #000000;
+    --color-blurple: #5865F2;
+    --color-text: #E0E0E0;
+    --color-muted: #B0B0B0;
+    --color-border: #333333;
+    --color-vibrant: #5865F2;
+    --color-vibrant-dark: rgba(88, 101, 242, 0.15);
+}
+
+#dynamic-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: -1;
+    background: linear-gradient(135deg, var(--color-vibrant-dark) 0%, var(--color-bg) 100%);
+    transition: background 1.2s ease-in-out, transform 0.1s ease-out, filter 0.1s ease-out;
+    transform: scale(var(--beat-scale, 1));
+    filter: brightness(var(--beat-bright, 1));
+    will-change: transform, filter;
+}
+
+.bright-bg { color: #1a1a2e !important; }
+.bright-bg .text-white,
+.bright-bg .text-white\/80,
+.bright-bg .text-white\/70,
+.bright-bg .text-white\/60,
+.bright-bg .text-white\/50,
+.bright-bg .text-white\/40 {
+    color: rgba(15, 15, 30, 0.85) !important;
+}
+.bright-bg .text-discord-muted {
+    color: rgba(15, 15, 30, 0.55) !important;
+}
+.bright-bg .glass-panel {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-color: rgba(0, 0, 0, 0.08);
+}
+.bright-bg .glass-panel .text-white,
+.bright-bg .glass-panel .text-white\/80 {
+    color: rgba(15, 15, 30, 0.9) !important;
+}

@@ -1,0 +1,279 @@
+/* src/styles/components.css */
+
+/* Debug Console */
+#ag-debug-console {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 200px;
+    background: rgba(0, 0, 0, 0.9);
+    color: #0f0;
+    font-family: monospace;
+    padding: 10px;
+    overflow-y: auto;
+    z-index: 9999;
+    display: none;
+    border-top: 2px solid #333;
+}
+#ag-debug-toggle {
+    position: fixed;
+    bottom: 5px;
+    right: 5px;
+    z-index: 10000;
+    background: #333;
+    color: #fff;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-size: 10px;
+    cursor: pointer;
+    opacity: 0.5;
+}
+#ag-debug-toggle:hover { opacity: 1; }
+
+/* Elite Liquid Glass Base */
+.glass-panel {
+    background-color: rgba(22, 24, 28, 0.85);
+    background-color: rgba(22, 24, 28, calc(var(--glass-opacity) / 100));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    will-change: transform, backdrop-filter;
+    transform: translateZ(0);
+    position: relative;
+    border-radius: 12px;
+}
+.glass-panel::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.05);
+    z-index: 50;
+}
+.glass-panel {
+    backdrop-filter: blur(24px) saturate(180%);
+    position: relative;
+}
+.glass-panel::before {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    z-index: -1;
+    border-radius: inherit;
+    filter: url(#refraction) blur(10px);
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* Dynamic Liquid Lyrics Classes */
+.active-lyric-line {
+    background: linear-gradient(to right, var(--color-blurple) var(--karaoke-fill, 0%), color-mix(in srgb, var(--color-text) 30%, transparent) var(--karaoke-fill, 0%));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    text-shadow: 0 0 15px rgba(88, 101, 242, 0.2);
+    transition: font-size 0.3s cubic-bezier(0.25, 1, 0.5, 1), text-shadow 0.3s ease;
+    font-size: clamp(1.5rem, 4vw, 2.5rem);
+    position: relative;
+    z-index: 10;
+}
+.inactive-lyric-line {
+    font-size: clamp(1.2rem, 3vw, 1.8rem);
+    opacity: 0.4;
+    color: var(--color-text);
+    transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.inactive-lyric-line:hover {
+    opacity: 0.8;
+    filter: blur(0px);
+    color: var(--color-text);
+}
+
+/* Sliders */
+input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    background: transparent;
+    outline: none;
+}
+input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.8);
+    box-shadow: 0 2px 10px var(--color-vibrant, var(--color-blurple)), inset 0 1px 3px rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(4px);
+    cursor: pointer;
+    margin-top: -4px;
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.group:hover input[type=range]::-webkit-slider-thumb,
+input[type=range]:active::-webkit-slider-thumb {
+    opacity: 1;
+}
+input[type=range]::-webkit-slider-thumb:hover {
+    transform: scale(1.3);
+}
+input[type=range]::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 6px;
+    cursor: pointer;
+    background: transparent;
+    border-radius: 3px;
+}
+
+input[type=range].theme-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.1);
+    height: 6px;
+    border-radius: 10px;
+    outline: none;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+input[type=range].theme-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--color-blurple, #5865f2);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 0 6px var(--color-blurple, #5865f2);
+    cursor: pointer;
+    transition: transform 0.1s;
+}
+input[type=range].theme-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+/* EQ Specific Slider */
+input[type=range].eq-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 44px;
+    background: transparent !important;
+    outline: none;
+}
+input[type=range].eq-slider::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 12px;
+    background: rgba(0, 0, 0, 0.45) !important;
+    border-radius: 6px;
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(0, 0, 0, 0.5);
+    margin-top: 16px;
+}
+input[type=range].eq-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 44px;
+    border-radius: 4px;
+    background: linear-gradient(to right, #999 0%, #d4d4d4 43%, #eb3f3f 43%, #eb3f3f 57%, #d4d4d4 57%, #888 100%);
+    border: 1px solid rgba(0, 0, 0, 0.8);
+    box-shadow: 0 5px 10px rgba(0, 0, 0, 0.6), inset 0 1px 2px rgba(255, 255, 255, 0.8);
+    cursor: pointer;
+    transition: transform 0.1s;
+    margin-top: -16px;
+    opacity: 1 !important;
+}
+.dark input[type=range].eq-slider::-webkit-slider-thumb,
+[data-theme='dark'] input[type=range].eq-slider::-webkit-slider-thumb,
+[data-theme='midnight'] input[type=range].eq-slider::-webkit-slider-thumb {
+    background: linear-gradient(to right, #555 0%, #a0a0a0 45%, #ff4a4a 45%, #ff4a4a 55%, #a0a0a0 55%, #444 100%);
+    border: 1px solid rgba(0, 0, 0, 0.9);
+    box-shadow: 0 5px 10px rgba(0, 0, 0, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.2);
+}
+input[type=range].eq-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.05);
+}
+
+.progress-bar {
+    border-radius: 4px;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+}
+.progress-bar::-webkit-slider-runnable-track {
+    background: transparent;
+}
+
+.active-row {
+    background-color: color-mix(in srgb, var(--color-blurple) 10%, transparent) !important;
+}
+.active-text {
+    color: var(--color-blurple, #5865F2) !important;
+    font-weight: 600;
+}
+
+.table-row-hover:hover .play-icon-cell { opacity: 1; display: flex; }
+.table-row-hover:hover .track-num-cell { display: none; }
+
+.morphing-button {
+    transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.morphing-button:active {
+    transform: scale(0.92);
+    filter: url(#refraction) brightness(1.2);
+    box-shadow: 0 0 15px var(--color-blurple);
+}
+
+/* Toast Notifications */
+.toast-container {
+    position: fixed;
+    bottom: 100px;
+    right: 24px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+}
+.toast {
+    pointer-events: auto;
+    padding: 12px 20px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    animation: toast-in 0.3s ease-out;
+    max-width: 360px;
+}
+.toast-success { background: rgba(39, 174, 96, 0.9); color: white; }
+.toast-error { background: rgba(231, 76, 60, 0.9); color: white; }
+.toast-info { background: rgba(88, 101, 242, 0.9); color: white; }
+@keyframes toast-in {
+    from { opacity: 0; transform: translateY(16px) scale(0.95); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Performance Mode */
+[data-performance="true"] .glass-panel { backdrop-filter: blur(4px) !important; }
+[data-performance="true"] .glass-panel::before,
+[data-performance="true"] .glass-panel::after { display: none !important; }
+[data-performance="true"] .morphing-button:active { filter: brightness(1.2) !important; }
+[data-performance="true"] #dynamic-bg { transition: none !important; }
+[data-performance="true"] * { animation-duration: 0.01ms !important; transition-duration: 0.1s !important; }
+[data-performance="true"] .animate-pulse,
+[data-performance="true"] .animate-spin,
+[data-performance="true"] .animate-bounce { animation: none !important; }
+
+/* View Transitions */
+@keyframes view-fade-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.view-transition-wrap {
+    animation: view-fade-in 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+    height: 100%;
+    width: 100%;
+}
+

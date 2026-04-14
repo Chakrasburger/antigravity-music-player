@@ -1,12 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+from PyInstaller.utils.hooks import collect_submodules
+mutagen_hidden = collect_submodules('mutagen')
+
 a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[('index.html', '.'), ('server.py', '.'), ('assets', 'assets')],
-    hiddenimports=['mutagen', 'yt_dlp', 'syncedlyrics', 'PIL'],
+    datas=[('index.html', '.'), ('server.py', '.'), ('remote.html', '.'), ('assets', 'assets')],
+    hiddenimports=mutagen_hidden + ['yt_dlp', 'yt_dlp.extractor', 'syncedlyrics', 'PIL'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

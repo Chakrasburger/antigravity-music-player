@@ -1,7 +1,7 @@
 @echo off
 echo Building ChakrasPlayer Executable...
 py -m pip install pyinstaller
-py -m PyInstaller ChakrasPlayer.spec --noconfirm
+py -m PyInstaller ChakrasPlayer.spec --noconfirm --clean
 
 if not exist "Builds" mkdir "Builds"
 

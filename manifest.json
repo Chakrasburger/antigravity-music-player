@@ -1,20 +1,15 @@
 {
-  "name": "Neon Music",
-  "short_name": "Neon",
+  "name": "ChakrasPlayer",
+  "short_name": "Chakras",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#0f0c29",
-  "theme_color": "#00f3ff",
-  "description": "Un reproductor de música con estilo neón.",
+  "background_color": "#1e2124",
+  "theme_color": "#5865f2",
+  "description": "Antigravity Music Player (Native Linux Port)",
   "icons": [
     {
-      "src": "icon-192x192.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "icon-512x512.png",
-      "sizes": "512x512",
+      "src": "app_icon.png",
+      "sizes": "256x256",
       "type": "image/png"
     }
   ]

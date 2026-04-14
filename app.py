@@ -6,6 +6,8 @@ import hashlib
 import base64
 import threading
 import socketserver
+import subprocess
+import json
 import time
 
 # ConfiguraciÃ³n del entorno PyInstaller
@@ -13,15 +15,16 @@ if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
     if sys._MEIPASS not in sys.path:
         sys.path.append(sys._MEIPASS)
 
-# ConfiguraciÃ³n del servidor
-host = "127.0.0.1"
+# Configuración del servidor
+host = "0.0.0.0"  # Bind to all interfaces for Chakras Remote
 PORT = 5888
 
 # ImportaciÃ³n del handler del servidor
 try:
-    from server import ChakrasPlayerAPIHandler, sync_library
+    from server import ModularChakrasHandler
+    from backend.services.library_service import sync_library
 except Exception as e:
-    ChakrasPlayerAPIHandler = None
+    ModularChakrasHandler = None
     sync_library = None
     # We don't have safe_print yet, so we'll log this later in main
     _startup_error = e
@@ -53,6 +56,23 @@ def safe_print(msg):
             f.write(log_msg + "\n")
     except:
         pass
+
+def ffprobe_duration(file_path):
+    """Uses ffprobe to get duration for formats mutagen can't parse."""
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', file_path],
+            capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == 'win32' else 0
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            dur = data.get('format', {}).get('duration')
+            if dur:
+                return float(dur)
+    except:
+        pass
+    return 0
 
 class Api:
     def __init__(self):
@@ -137,6 +157,24 @@ class Api:
         except Exception as e:
             safe_print(f"[Bridge] ERROR: {e}")
             return None
+
+    def get_library(self):
+        """Returns the tracks found in the server's songs_output.json file via bridge."""
+        safe_print("[Bridge] Library Requested via Native API")
+        try:
+            # The server uses biblioteca_lista.json
+            json_path = os.path.join(self.base_dir, "Descarga canciones", "biblioteca_lista.json")
+            if os.path.exists(json_path):
+                with open(json_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    safe_print(f"[Bridge] Found {len(data)} tracks in JSON")
+                    return {'status': 'success', 'tracks': data}
+            else:
+                safe_print(f"[Bridge] Library file NOT FOUND at {json_path}")
+                return {'status': 'success', 'tracks': []}
+        except Exception as e:
+            safe_print(f"[Bridge] Library error: {e}")
+            return {'status': 'error', 'message': str(e)}
 
     def scan_folder(self, folder_path):
         """Pure Native folder scanner - eliminates /api/scan-folder."""
@@ -232,6 +270,11 @@ class Api:
                             except Exception as e:
                                 safe_print(f"Error parseando metadatos para {file}: {e}")
                         
+                        # ffprobe fallback for duration on formats mutagen can't parse
+                        file_ext = os.path.splitext(full_path)[1].lower()
+                        if track_data["duration"] == 0 and file_ext in ('.webm', '.mp4', '.m4a', '.ogg', '.opus'):
+                            track_data["duration"] = ffprobe_duration(full_path)
+                        
                         tracks.append(track_data)
             safe_print(f"[Scan] Success: {len(tracks)} files")
             return {'status': 'success', 'tracks': tracks}
@@ -240,9 +283,96 @@ class Api:
             return {'status': 'error', 'message': str(e)}
 
     def edit_metadata(self, data):
-        """Stub for metadata editing via bridge - avoids 405 error."""
+        """Writes metadata to the actual audio file using mutagen."""
         safe_print(f"[Bridge] Metadata Update requested: {data.get('id')}")
-        return {'status': 'success', 'message': 'Metadata update received by bridge (Native)'}
+        try:
+            track_id = data.get('id', '')
+            file_path = track_id
+            if not file_path or not os.path.exists(file_path):
+                safe_print(f"[Bridge] File not found for metadata edit: {file_path}")
+                return {'status': 'success', 'message': 'Metadata saved to database only (file not found on disk)'}
+
+            from server import write_metadata
+            meta_data = {
+                'title': data.get('title'),
+                'artist': data.get('artist'),
+                'album': data.get('album'),
+                'year': data.get('year'),
+                'genre': data.get('genre')
+            }
+            success = write_metadata(file_path, meta_data)
+            if success:
+                safe_print(f"[Bridge] Metadata written to file: {os.path.basename(file_path)}")
+                return {'status': 'success', 'message': 'Metadata saved to file'}
+            else:
+                safe_print(f"[Bridge] write_metadata returned False for {file_path}")
+                return {'status': 'success', 'message': 'Metadata saved to database (file write skipped)'}
+        except Exception as e:
+            safe_print(f"[Bridge] Error writing metadata: {e}")
+            return {'status': 'success', 'message': f'Database updated, file write error: {str(e)}'}
+
+    def get_playlists(self):
+        """Bridge method to fetch user playlists via internal API proxy."""
+        try:
+            import requests
+            resp = requests.post(f"http://127.0.0.1:{PORT}/api/playlists", timeout=5)
+            return resp.json()
+        except Exception as e:
+            return {'status': 'error', 'playlists': [], 'message': str(e)}
+
+    def get_daily_mixes(self, payload):
+        """Bridge method to fetch daily mixes via internal API proxy."""
+        try:
+            import requests
+            resp = requests.post(f"http://127.0.0.1:{PORT}/api/daily-mixes", 
+                               json=payload, timeout=10)
+            return resp.json()
+        except Exception as e:
+            return {'status': 'error', 'mixes': [], 'message': str(e)}
+
+    def get_local_ip(self):
+        """Bridge method to get local IP reliably via python."""
+        try:
+            import requests
+            resp = requests.get(f"http://127.0.0.1:{PORT}/api/local-ip", timeout=2)
+            return resp.json()
+        except Exception:
+            # Fallback direct detection if server is busy
+            try:
+                import socket
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.settimeout(0.1)
+                s.connect(("8.8.8.8", 80))
+                ip = s.getsockname()[0]
+                s.close()
+                return {'ip': ip, 'port': PORT}
+            except:
+                return {'ip': '127.0.0.1', 'port': PORT}
+
+    def get_ollama_models(self):
+        """Bridge method to fetch Ollama models without CORS issues."""
+        try:
+            import requests
+            resp = requests.get("http://127.0.0.1:11434/api/tags", timeout=10)
+            if resp.status_code == 200:
+                models = resp.json().get("models", [])
+                simplified = [m.get("name") for m in models]
+                return {'status': 'success', 'models': simplified}
+            return {'status': 'error', 'message': f'Ollama status {resp.status_code}'}
+        except Exception as e:
+            return {'status': 'error', 'message': str(e)}
+
+    def ai_chat(self, payload):
+        """Bridge method for AI chat to bypass fetch issues."""
+        try:
+            import requests
+            import json
+            # Redirect to the local server logic but via direct request
+            resp = requests.post("http://127.0.0.1:5888/api/ai-chat", 
+                               json=payload, timeout=300)
+            return resp.json()
+        except Exception as e:
+            return {'status': 'error', 'reply': f'Error de Bridge: {str(e)}'}
 
     def extract_batch_metadata(self, file_content_b64):
         """Extracts track names/artist metadata from a base64 encoded file (.txt or .json)."""
@@ -367,12 +497,12 @@ def main():
             except Exception as e:
                 safe_print(f"[Backend] Error en sync_library: {e}")
 
-        if ChakrasPlayerAPIHandler is None:
-            safe_print("[Backend] ERROR: No se pudo cargar ChakrasPlayerAPIHandler. El streaming de audio no aparecerÃ¡.")
+        if ModularChakrasHandler is None:
+            safe_print("[Backend] ERROR: No se pudo cargar ModularChakrasHandler. El streaming de audio no aparecerÃ¡.")
             return
         try:
             socketserver.ThreadingTCPServer.allow_reuse_address = True
-            with socketserver.ThreadingTCPServer((host, PORT), ChakrasPlayerAPIHandler) as httpd:
+            with socketserver.ThreadingTCPServer((host, PORT), ModularChakrasHandler) as httpd:
                 safe_print(f"[Backend] Servidor iniciado en http://{host}:{PORT}")
                 httpd.serve_forever()
         except Exception as e:
@@ -381,11 +511,17 @@ def main():
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
 
-    index_path = get_resource_path('index.html')
-    safe_print(f"[Main] Buscando index.html en: {index_path}")
-    if not os.path.exists(index_path):
-        safe_print(f"[Main] ERROR: No se encontrÃ³ index.html en {index_path}")
+    index_path = get_resource_path('index_v2.html')
+    safe_print(f"[Main] Loading INDEX from: {os.path.abspath(index_path)}")
+    safe_print(f"[Main] Current Working Directory: {os.getcwd()}")
     
+    # Check if the library JSON exists at startup
+    json_path = os.path.join(api.base_dir, "Descarga canciones", "biblioteca_lista.json")
+    if os.path.exists(json_path):
+        safe_print(f"[Main] Library JSON found at: {json_path}")
+    else:
+        safe_print(f"[Main] WARNING: Library JSON NOT FOUND at: {json_path}")
+
     window = webview.create_window(
         title='ChakrasPlayer', 
         url=index_path,
@@ -393,10 +529,15 @@ def main():
         height=840,
         min_size=(1024, 600),
         background_color='#000000',
+        icon=os.path.join(application_path, 'app_icon.png'),
         js_api=api
     )
-    
-    webview.start(debug=False)
+    # Forzar backend GTK en Linux y asegurar persistencia para IndexedDB
+    if sys.platform != 'win32':
+        # En Linux, a veces IndexedDB necesita una ruta de datos explícita o modo no privado
+        webview.start(debug=False, gui='gtk', private_mode=False)
+    else:
+        webview.start(debug=False)
 
 if __name__ == '__main__':
     main()
