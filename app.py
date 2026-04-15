@@ -523,13 +523,12 @@ def main():
         safe_print(f"[Main] WARNING: Library JSON NOT FOUND at: {json_path}")
 
     window = webview.create_window(
-        title='ChakrasPlayer', 
+        title='ChakrasPlayer',
         url=index_path,
-        width=1320, 
+        width=1320,
         height=840,
         min_size=(1024, 600),
         background_color='#000000',
-        icon=os.path.join(application_path, 'app_icon.png'),
         js_api=api
     )
     # Forzar backend GTK en Linux y asegurar persistencia para IndexedDB

@@ -23,6 +23,7 @@
     <link rel="stylesheet" href="src/styles/base.css">
     <link rel="stylesheet" href="src/styles/themes.css">
     <link rel="stylesheet" href="src/styles/components.css">
+    <link rel="stylesheet" href="src/styles/glassmorphism-enhanced.css">
     <link rel="stylesheet" href="src/styles/mobile.css">
     <script>
         // Redirección Automática para Celular (Control Remoto)
@@ -106,19 +107,22 @@
             --color-primary-soft: rgba(88, 101, 242, 0.1);
         }
 
-        .accent-gradient, [data-accent="gradient"] {
+        .accent-gradient,
+        [data-accent="gradient"] {
             background: linear-gradient(135deg, var(--color-primary), var(--color-primary-glow)) !important;
             box-shadow: 0 4px 15px var(--color-primary-glass) !important;
         }
 
-        .accent-glass, [data-accent="glass"] {
+        .accent-glass,
+        [data-accent="glass"] {
             background: var(--color-primary-glass) !important;
             backdrop-filter: blur(10px) !important;
             -webkit-backdrop-filter: blur(10px) !important;
             border: 1px solid var(--color-primary-soft) !important;
         }
 
-        .accent-text, [data-accent="text"] {
+        .accent-text,
+        [data-accent="text"] {
             color: var(--color-primary) !important;
         }
 
@@ -126,7 +130,7 @@
             background: linear-gradient(to bottom right, var(--color-primary), var(--color-vibrant-dark)) !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
         }
-        
+
         /* Forzar iconos sidebar */
         .sidebar-icon-active {
             color: var(--color-primary) !important;
@@ -152,7 +156,7 @@
 
     <div id="root"></div>
 
-    
+
     <!-- FASE 3: Módulos JS puros (sin JSX) -->
     <script src="src/js/db.js"></script>
     <script src="src/js/utils.js"></script>
@@ -178,7 +182,7 @@
     <script type="text/babel" src="src/components/DownloadsView.js"></script>
     <script type="text/babel" src="src/components/Visualizer.js"></script>
     <script type="text/babel" src="src/components/SystemGadget.js"></script>
-    <script type="text/babel" src="src/App.js"></script>
+    <script type="text/babel" src="src/App.js?v=2"></script>
     <script type="text/babel">
         // Componentes extraídos
         // AnalyticsDashboard se carga desde src/components/AnalyticsDashboard.js

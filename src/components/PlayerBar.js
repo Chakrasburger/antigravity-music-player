@@ -3,51 +3,60 @@
 // Requiere globals: React, window.StorageApi, window.formatTime
 
 const PlayerBar = ({
-    activeTrack, currentlyEnriching, 
-    playbackQueue, setPlaybackQueue, 
+    activeTrack, currentlyEnriching,
+    playbackQueue, setPlaybackQueue,
     library, setLibrary,
+    isPlaying,
     isShuffle, toggleShuffle,
     isMixMode, setIsMixMode,
     prevTrack, seekBackward10,
-    isPlaying, togglePlay,
+    togglePlay,
     seekForward10, nextTrack,
     repeatMode, toggleRepeat,
     uiCurrentTimeTextRef, currentProgressRef, uiProgressInputRef,
     duration, handleSeek,
     handleDeviceSelect, audioDeviceId, showDevicePicker, setShowDevicePicker, audioDevices, selectDevice,
     togglePopUpView, view, initPiP,
+    showFloatingPlayer, setShowFloatingPlayer,
     isMuted, toggleMute, volume, handleVolume
 }) => {
+    // Find last saved track from library
+    const lastTrackId = window.localStorage ? localStorage.getItem('chakras_last_track_id') : null;
+    let displayTrack = activeTrack;
+    if (!displayTrack && lastTrackId && library) {
+        const found = library.find(t => t.id === lastTrackId);
+        if (found) displayTrack = found;
+    }
     return (
         <footer className="w-full h-[90px] shrink-0 glass-panel border-t border-white/5 px-6 flex items-center justify-between z-50 shadow-[0_-4px_30px_rgba(0,0,0,0.1)] relative">
             {/* Left: Track Info */}
             <div className="flex items-center gap-4 w-1/3 min-w-[200px]">
-                {activeTrack && (
+                 {(displayTrack || activeTrack) && (
                     <>
-                        {(activeTrack.coverUrl || activeTrack.ytThumbnail || activeTrack.uploaderThumbnail) ? (
+                        {(displayTrack.coverUrl || displayTrack.ytThumbnail || displayTrack.uploaderThumbnail) ? (
                             (() => {
-                                const finalCover = activeTrack.coverUrl || activeTrack.ytThumbnail || activeTrack.uploaderThumbnail;
+                                const finalCover = displayTrack.coverUrl || displayTrack.ytThumbnail || displayTrack.uploaderThumbnail;
                                 if (finalCover.startsWith('gradient:')) {
                                     return <div className="w-14 h-14 rounded shadow-sm border border-discord-secondary flex-shrink-0" style={{ background: `linear-gradient(135deg, ${finalCover.replace('gradient:', '').split('-')[0]}, ${finalCover.replace('gradient:', '').split('-')[1]})` }}></div>;
                                 }
                                 return <img src={finalCover.startsWith('/') ? `http://127.0.0.1:5888${finalCover}${finalCover.includes('?') ? '&' : '?'}s=400` : finalCover} onError={(e) => { e.target.style.display = 'none'; }} className="w-14 h-14 rounded shadow-sm object-cover border border-discord-secondary" alt="cover" />;
                             })()
                         ) : (
-                            <div className={`w-14 h-14 rounded flex items-center justify-center border border-white/5 ${currentlyEnriching === activeTrack.id ? 'skeleton' : 'bg-discord-secondary text-discord-muted border-discord-border/50'}`}>
+                            <div className={`w-14 h-14 rounded flex items-center justify-center border border-white/5 ${currentlyEnriching === displayTrack.id ? 'skeleton' : 'bg-discord-secondary text-discord-muted border-discord-border/50'}`}>
                                 <i className="fa-solid fa-music text-xl"></i>
                             </div>
                         )}
                         <div className="flex flex-col min-w-0 pr-4">
-                            <span className={`font-semibold text-sm truncate cursor-pointer hover:underline ${currentlyEnriching === activeTrack.id && (activeTrack.title.includes('file') || activeTrack.title.includes('Track')) ? 'skeleton w-32' : 'text-discord-text'}`}>{activeTrack.title}</span>
-                            <span className={`text-xs hover:underline cursor-pointer truncate ${currentlyEnriching === activeTrack.id && activeTrack.artist === 'Unknown Artist' ? 'skeleton w-24 mt-1' : 'text-discord-muted'}`}>{activeTrack.artist}</span>
+                            <span className={`font-semibold text-sm truncate cursor-pointer hover:underline ${currentlyEnriching === displayTrack.id && (displayTrack.title.includes('file') || displayTrack.title.includes('Track')) ? 'skeleton w-32' : 'text-discord-text'}`}>{displayTrack.title}</span>
+                            <span className={`text-xs hover:underline cursor-pointer truncate ${currentlyEnriching === displayTrack.id && displayTrack.artist === 'Unknown Artist' ? 'skeleton w-24 mt-1' : 'text-discord-muted'}`}>{displayTrack.artist}</span>
                         </div>
                         <button onClick={() => {
-                            const newRating = activeTrack.rating === 1 ? 0 : 1;
-                            if(window.StorageApi) window.StorageApi.rateTrack(activeTrack.id, newRating);
-                            setPlaybackQueue(playbackQueue.map(t => t.id === activeTrack.id ? { ...t, rating: newRating } : t));
-                            setLibrary(library.map(t => t.id === activeTrack.id ? { ...t, rating: newRating } : t));
-                        }} className={`text-xl transition-colors morphing-button ml-2 p-1.5 rounded-full ${activeTrack.rating === 1 ? 'text-red-500 bg-red-500/10' : 'text-discord-muted hover:text-discord-text'}`}>
-                            <i className={`${activeTrack.rating === 1 ? 'fa-solid' : 'fa-regular'} fa-heart`}></i>
+                            const newRating = displayTrack.rating === 1 ? 0 : 1;
+                            if (window.StorageApi) window.StorageApi.rateTrack(displayTrack.id, newRating);
+                            setPlaybackQueue(playbackQueue.map(t => t.id === displayTrack.id ? { ...t, rating: newRating } : t));
+                            setLibrary(library.map(t => t.id === displayTrack.id ? { ...t, rating: newRating } : t));
+                        }} className={`text-xl transition-colors morphing-button ml-2 p-1.5 rounded-full ${displayTrack.rating === 1 ? 'text-red-500 bg-red-500/10' : 'text-discord-muted hover:text-discord-text'}`}>
+                            <i className={`${displayTrack.rating === 1 ? 'fa-solid' : 'fa-regular'} fa-heart`}></i>
                         </button>
                     </>
                 )}
@@ -85,7 +94,7 @@ const PlayerBar = ({
                     <span ref={uiCurrentTimeTextRef} className="w-10 text-right">{window.formatTime ? window.formatTime(currentProgressRef.current || 0) : '0:00'}</span>
                     <input
                         ref={uiProgressInputRef}
-                        type="range" min="0" max={duration || 100} step="0.1" defaultValue={0} 
+                        type="range" min="0" max={duration || 100} step="0.1" defaultValue={0}
                         onInput={(e) => {
                             const perc = (e.target.value / (duration || 100)) * 100;
                             e.target.style.background = `linear-gradient(to right, var(--color-vibrant, var(--color-blurple)) ${perc}%, var(--color-tertiary) ${perc}%)`;
@@ -130,7 +139,11 @@ const PlayerBar = ({
                 <button onClick={() => togglePopUpView('lyrics')} title="Lyrics" className={`${view === 'lyrics' ? 'text-discord-blurple' : 'text-discord-muted'} hover:text-discord-text transition-colors hidden md:block`}>
                     <i className="fa-solid fa-microphone-lines"></i>
                 </button>
-                <button onClick={initPiP} title="Mini-Reproductor Flotante" className={`text-discord-muted hover:text-discord-blurple transition-colors hidden md:block`}>
+                <button
+                    onClick={() => setShowFloatingPlayer(!showFloatingPlayer)}
+                    title="Mini-Reproductor Flotante"
+                    className={`${showFloatingPlayer ? 'text-discord-blurple' : 'text-discord-muted'} hover:text-discord-blurple transition-colors hidden md:block`}
+                >
                     <i className="fa-solid fa-up-right-and-down-left-from-center pb-1 text-sm"></i>
                 </button>
                 <button onClick={() => togglePopUpView('queue')} title="Queue" className={`${view === 'queue' ? 'text-discord-blurple' : 'text-discord-muted'} hover:text-discord-text transition-colors hidden lg:block`}>
@@ -142,7 +155,7 @@ const PlayerBar = ({
                 <div className="flex items-center gap-2 w-28 pl-2">
                     <i onClick={toggleMute} className={`fa-solid ${isMuted || volume === 0 ? 'fa-volume-xmark text-red-500' : volume < 0.5 ? 'fa-volume-low text-discord-blurple' : 'fa-volume-high text-discord-blurple'} text-sm cursor-pointer hover:scale-110 transition-transform`}></i>
                     <input
-                        type="range" min="0" max="1" step="0.01" value={volume} 
+                        type="range" min="0" max="1" step="0.01" value={volume}
                         onInput={(e) => {
                             const v = parseFloat(e.target.value);
                             const perc = v * 100;

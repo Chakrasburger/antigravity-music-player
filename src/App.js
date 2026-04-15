@@ -808,7 +808,13 @@ const App = () => {
         }
     };
 
-    const [themeSettings, setThemeSettings] = useState(null);
+    const [themeSettings, setThemeSettings] = useState({
+        primaryColor: '#5865f2',
+        blur: 30,
+        saturate: 210,
+        opacity: 70,
+        baseTheme: ''
+    });
 
     // YouTube Replace State
     const [replacingTrack, setReplacingTrack] = useState(null);
@@ -1944,6 +1950,28 @@ const App = () => {
     useEffect(() => { window.StorageApi.setSetting('normalize', isNormalize); }, [isNormalize]);
     useEffect(() => { window.StorageApi.setSetting('gapless', isGapless); }, [isGapless]);
 
+    // Auto-resume playback when library loads with saved position
+    const [hasRestored, setHasRestored] = React.useState(false);
+    useEffect(() => {
+        if (hasRestored || library.length === 0) return;
+        const savedIdx = parseInt(localStorage.getItem('chakras_current_track_index') || '-1', 10);
+        const savedTrackId = localStorage.getItem('chakras_last_track_id');
+        if (savedIdx >= 0 && savedTrackId) {
+            const track = library.find(t => t.id === savedTrackId);
+            if (track) {
+                console.log('[AutoResume] Found saved track:', savedTrackId, 'at index:', savedIdx);
+                setCurrentTrackIndex(savedIdx);
+                setPlaybackQueue(library);
+                setActiveTrack(track);
+                setHasRestored(true);
+                // Auto-play if autoplay is enabled
+                if (isAutoplay && playTrackCore) {
+                    setTimeout(() => playTrackCore(track), 500);
+                }
+            }
+        }
+    }, [library]);
+
     useEffect(() => {
         if (audioDeviceId) {
             // Note: setSinkId is currently only available on HTMLMediaElement, not directly on AudioContext destination in all browsers.
@@ -2335,6 +2363,14 @@ const App = () => {
         const rMode = repeatModeRef.current;
 
         if (queue.length === 0) return;
+
+        // Save current track position before switching
+        const currentPos = currentProgressRef.current;
+        const currentActive = activeTrack;
+        if (currentActive && currentPos > 0) {
+            localStorage.setItem('chakras_track_position_' + currentActive.id, currentPos);
+        }
+
         let nextIdx;
         if (rMode === 'one' && isAutoNext && !isTransition) {
             nextIdx = index;
@@ -2355,6 +2391,14 @@ const App = () => {
         const queue = playbackQueueRef.current;
         const index = currentTrackIndexRef.current;
         if (queue.length === 0) return;
+
+        // Save current track position before switching
+        const currentPos = currentProgressRef.current;
+        const currentActive = activeTrack;
+        if (currentActive && currentPos > 0) {
+            localStorage.setItem('chakras_track_position_' + currentActive.id, currentPos);
+        }
+
         const prevIdx = index > 0 ? index - 1 : queue.length - 1;
         const track = queue[prevIdx];
         setCurrentTrackIndex(prevIdx);
@@ -2434,6 +2478,10 @@ const App = () => {
             audio.pause();
             setIsPlaying(false);
             if (reqAnimFrameRef.current) cancelAnimationFrame(reqAnimFrameRef.current);
+            // Save position when pausing
+            if (activeTrack && currentProgressRef.current > 0) {
+                localStorage.setItem('chakras_track_position_' + activeTrack.id, currentProgressRef.current);
+            }
         } else {
             if (activeTrack && audio.src) {
                 audio.play().then(() => {
@@ -2456,9 +2504,8 @@ const App = () => {
         const audio2 = audioTagRef2.current;
         if (audio) audio.volume = Math.min(1, Math.max(0, v));
         if (audio2) audio2.volume = Math.min(1, Math.max(0, v));
-        // Persistent volume across restarts
         if (window.localStorage) localStorage.setItem('chakras_volume', v);
-    }, []);
+    }, [setVolume]);
 
     const startProgressLoop = () => {
         if (reqAnimFrameRef.current) cancelAnimationFrame(reqAnimFrameRef.current);
@@ -2635,6 +2682,11 @@ const App = () => {
             setIsPlaying(true);
             setIsLoading(false);
             setActiveTrack(track);
+            // Restore saved position for this track
+            const savedPos = localStorage.getItem('chakras_track_position_' + track.id);
+            if (savedPos && !isNaN(parseFloat(savedPos))) {
+                audio.currentTime = parseFloat(savedPos);
+            }
             if (!isCrossfadeTransition) {
                 startProgressLoop();
             } else {
@@ -2647,6 +2699,18 @@ const App = () => {
         });
     }, [nextTrack]);
 
+
+    // Save playback position when closing app
+    useEffect(() => {
+        const savePosition = () => {
+            if (activeTrack && currentProgressRef.current > 0) {
+                localStorage.setItem('chakras_track_position_' + activeTrack.id, currentProgressRef.current);
+                localStorage.setItem('chakras_last_track_id', activeTrack.id);
+            }
+        };
+        window.addEventListener('beforeunload', savePosition);
+        return () => window.removeEventListener('beforeunload', savePosition);
+    }, [activeTrack]);
 
     // Main Play Effect â€” minimal, only syncs UI state, does NOT trigger audio
     useEffect(() => {
@@ -2667,14 +2731,14 @@ const App = () => {
             const bb = Math.round(b * factor);
 
             root.style.setProperty('--color-vibrant', `rgb(${rr},${gg},${bb})`);
-            if (!themeSettings.backgroundColor) {
+            if (!themeSettings?.backgroundColor) {
                 root.style.setProperty('--color-vibrant-dark', `rgba(${rr},${gg},${bb},0.18)`);
             }
         };
 
         const reset = () => {
             root.style.setProperty('--color-vibrant', '#5865F2');
-            if (!themeSettings.backgroundColor)
+            if (!themeSettings?.backgroundColor)
                 root.style.setProperty('--color-vibrant-dark', 'rgba(88,101,242,0.15)');
         };
 
@@ -2709,7 +2773,7 @@ const App = () => {
             ? `${coverSrc}?s=200`
             : coverSrc;
 
-    }, [activeTrack?.coverUrl, themeSettings.backgroundColor]);
+    }, [activeTrack?.coverUrl, themeSettings?.backgroundColor]);
 
     // Reset lyrics state when track changes
     useEffect(() => {
@@ -2754,6 +2818,10 @@ const App = () => {
         if (audioTagRef.current) {
             audioTagRef.current.currentTime = time;
             setCurrentTime(time);
+            // Save position after seeking
+            if (activeTrack && time > 0) {
+                localStorage.setItem('chakras_track_position_' + activeTrack.id, time);
+            }
         }
     };
 

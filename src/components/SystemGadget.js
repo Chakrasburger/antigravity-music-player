@@ -1,16 +1,24 @@
 const HardwareMonitor = ({ stats }) => {
-    if (!stats) return null;
+    if (!stats) {
+        return (
+            <div className="hardware-monitor-card glass-panel p-4 rounded-xl border border-white/5 shadow-2xl">
+                <div className="flex items-center justify-center h-32 text-white/30 text-sm">
+                    <i className="fa-solid fa-circle-notch fa-spin mr-2"></i> Cargando estadísticas...
+                </div>
+            </div>
+        );
+    }
 
-    const vramColor = stats.vram_percent > 90 ? '#ef4444' : stats.vram_percent > 70 ? '#f59e0b' : '#10b981';
+    const vramColor = (stats?.vram_percent ?? 0) > 90 ? '#ef4444' : (stats?.vram_percent ?? 0) > 70 ? '#f59e0b' : '#10b981';
     
     // Calculate useful VRAM info
-    const totalVramMB = stats.vram_total_mb || 24576; // Default to 24GB for 7900 XTX if 0
-    const vramUsedGB = (stats.vram_used_mb / 1024).toFixed(1);
+    const totalVramMB = stats?.vram_total_mb || 24576; // Default to 24GB for 7900 XTX if 0
+    const vramUsedGB = ((stats?.vram_used_mb ?? 0) / 1024).toFixed(1);
     const vramTotalGB = (totalVramMB / 1024).toFixed(0);
-    const vramFreeGB = Math.max(0, (totalVramMB - stats.vram_used_mb) / 1024).toFixed(1);
+    const vramFreeGB = Math.max(0, (totalVramMB - (stats?.vram_used_mb ?? 0)) / 1024).toFixed(1);
     
     // Safety percentage
-    const vramPerc = stats.vram_percent || (stats.vram_used_mb / totalVramMB * 100);
+    const vramPerc = stats?.vram_percent ?? ((stats?.vram_used_mb ?? 0) / totalVramMB * 100);
 
     return (
         <div className="hardware-monitor-card glass-panel p-4 rounded-xl border border-white/5 shadow-2xl animate-in fade-in zoom-in duration-500 overflow-hidden">
@@ -33,33 +41,58 @@ const HardwareMonitor = ({ stats }) => {
                 </div>
             </div>
 
-            {/* Top Stats Bar: Dashboard Style */}
+{/* Top Stats Bar: Dashboard Style */}
             <div className="grid grid-cols-3 gap-2 mb-4">
                 <div className="bg-white/[0.03] p-2.5 rounded-lg border border-white/5 text-center">
                     <div className="text-[9px] font-bold text-white/20 uppercase mb-1">CPU Total</div>
-                    <div className="text-sm font-mono font-bold text-white/90">{stats.cpu_percent}%</div>
+                    <div className="text-sm font-mono font-bold text-white/90">{stats?.cpu_percent ?? 0}%</div>
                 </div>
                 <div className="bg-white/[0.03] p-2.5 rounded-lg border border-white/5 text-center">
                     <div className="text-[9px] font-bold text-white/20 uppercase mb-1">RAM Total</div>
-                    <div className="text-sm font-mono font-bold text-white/90">{stats.ram_percent}%</div>
+                    <div className="text-sm font-mono font-bold text-white/90">{stats?.ram_percent ?? 0}%</div>
                 </div>
                 <div className="bg-white/[0.03] p-2.5 rounded-lg border border-white/5 text-center">
-                    <div className="text-[9px] font-bold text-white/20 uppercase mb-1">Potencia</div>
-                    <div className="text-sm font-mono font-bold text-emerald-400">{stats.gpu_power ? Math.round(stats.gpu_power) : '32'}W</div>
+                    <div className="text-[9px] font-bold text-white/20 uppercase mb-1">GPU Total</div>
+                    <div className="text-sm font-mono font-bold text-white/90">{stats?.gpu_percent ?? 0}%</div>
+                </div>
+            </div>
+<div className="bg-white/[0.03] p-2.5 rounded-lg border border-white/5 text-center">
+                    <div className="text-[9px] font-bold text-white/20 uppercase mb-1">RAM Total</div>
+                    <div className="text-sm font-mono font-bold text-white/90">{stats?.ram_percent ?? 0}%</div>
+                </div>
+                <div className="bg-white/[0.03] p-2.5 rounded-lg border border-white/5 text-center">
+                    <div className="text-[9px] font-bold text-white/20 uppercase mb-1">GPU Total</div>
+                    <div className="text-sm font-mono font-bold text-white/90">{stats?.gpu_percent ?? 0}%</div>
                 </div>
             </div>
 
-            {/* GPU Detail: Windows Center Style */}
-            <div className="relative p-4 rounded-xl bg-gradient-to-br from-indigo-950/40 via-black/40 to-purple-950/40 border border-white/10 shadow-inner mb-4 overflow-hidden">
-                <div className="absolute top-0 right-0 p-3 opacity-10">
-                    <i className="fa-solid fa-bolt-lightning text-4xl text-indigo-400"></i>
+            {/* GPU Stats */}
+            <div className="flex items-center justify-between mb-4 p-3 bg-white/[0.03] rounded-lg border border-white/5">
+                <div className="flex items-center gap-3">
+                    <i className="fa-solid fa-memory text-indigo-400"></i>
+                    <div>
+                        <div className="text-[9px] font-bold text-white/20 uppercase">Potencia GPU</div>
+                        <div className="text-sm font-mono font-bold text-emerald-400">{stats?.gpu_power ? Math.round(stats.gpu_power) : '32'}W</div>
+                    </div>
                 </div>
-                
-                <div className="flex justify-between items-center mb-4">
-                    <span className="text-[10px] font-bold text-indigo-300 flex items-center gap-2">
-                        <i className="fa-solid fa-server"></i> {stats.gpu_name}
-                    </span>
-                    <span className="text-xs font-mono text-white/80">{stats.gpu_temp}°C</span>
+                <div className="text-right">
+                    <div className="text-[9px] font-bold text-white/20 uppercase">Temperatura</div>
+                    <div className="text-sm font-mono font-bold text-white/90">{stats?.gpu_temp ?? 0}°C</div>
+                </div>
+            </div>
+
+            {/* GPU Name & VRAM */}
+            <div className="flex items-center justify-between mb-4 p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
+                <div className="flex items-center gap-3">
+                    <i className="fa-solid fa-server text-indigo-400"></i>
+                    <div>
+                        <span className="text-xs font-bold text-white">{stats?.gpu_name ?? 'AMD Radeon RX 7900 XTX'}</span>
+                        <span className="text-[10px] font-mono text-white/50 ml-2">v{((stats?.vram_total_mb ?? 24576) / 1024).toFixed(0)}GB</span>
+                    </div>
+                </div>
+                <div className="text-right">
+                    <div className="text-[9px] font-bold text-white/40 uppercase">Temperatura</div>
+                    <span className="text-xs font-mono text-white/80">{stats?.gpu_temp ?? 0}°C</span>
                 </div>
 
                 <div className="space-y-4">

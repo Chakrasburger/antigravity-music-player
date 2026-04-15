@@ -108,23 +108,37 @@ const SettingsView = ({
     };
 
     return (
-        <div className="flex flex-col gap-6 w-full p-6 md:p-10 animate-in fade-in duration-700 overflow-y-auto max-h-full">
+        <div className="flex flex-col gap-6 w-full min-h-[100vh] p-6 md:p-10 animate-in fade-in duration-700 overflow-y-auto">
             {/* Header */}
-            <div className="flex items-center justify-between bg-black/20 p-6 rounded-3xl border border-white/5 shadow-lg backdrop-blur-md relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-discord-blurple/20 rounded-full blur-[80px] -mr-10 -mt-10 pointer-events-none"></div>
-                <div className="relative z-10">
-                    <h2 className="text-3xl font-black text-white tracking-tight flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-discord-blurple text-white shadow-[0_0_25px_rgba(88,101,242,0.5)]">
+            <div className="flex items-center justify-between p-6 rounded-3xl border border-white/5 shadow-lg" style={{ 
+                background: 'rgba(0,0,0,0.7)', 
+                backdropFilter: 'blur(20px)', 
+                WebkitBackdropFilter: 'blur(20px)',
+                marginBottom: '20px'
+            }}>
+                <div className="relative z-10 flex-1">
+                    <h2 className="text-3xl font-black text-white tracking-tight flex items-center gap-4" style={{ 
+                        textShadow: '0 2px 8px rgba(0,0,0,0.8)', 
+                        justifySelf: 'center',
+                        margin: '0 auto'
+                    }}>
+                        <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-discord-blurple text-white shadow-[0_0_25px_rgba(88,101,242,0.5)]" style={{ marginBottom: '0' }}>
                            <i className="fa-solid fa-gear text-xl"></i>
                         </div>
                         Configuración
                     </h2>
-                    <p className="text-sm text-white/50 mt-2 pl-16">Personaliza tu experiencia auditiva y sistema motorizado de IA.</p>
+                    <p className="text-sm mt-2" style={{ 
+                        color: '#ffffff', 
+                        opacity: 0.9,
+                        textAlign: 'center',
+                        width: '100%',
+                        display: 'block'
+                    }}>Personaliza tu experiencia auditiva y sistema motorizado de IA.</p>
                 </div>
             </div>
 
             {/* Navigation Pills */}
-            <div className="flex flex-wrap glass-panel p-2 rounded-[20px] border border-white/10 w-fit shadow-[0_8px_32px_rgba(0,0,0,0.3)] backdrop-blur-3xl gap-2 z-10 sticky top-0 mx-auto sm:mx-0">
+            <div className="flex flex-wrap p-2 rounded-[20px] border border-white/10 w-fit shadow-[0_8px_32px_rgba(0,0,0,0.3)] gap-2 z-10 sticky top-0 mx-auto sm:mx-0" style={{ background: 'rgba(0,0,0,0.6)' }}>
                 {[
                     { id: 'appearance', icon: 'fa-wand-magic-sparkles', label: 'Apariencia' },
                     { id: 'audio', icon: 'fa-headphones-simple', label: 'Audio' },
@@ -140,26 +154,26 @@ const SettingsView = ({
                 ))}
             </div>
 
-            <div className="mt-2 text-white">
+            <div className="mt-2 text-white" style={{ color: '#ffffff', opacity: 1 }}>
                 {/* APARIENCIA */}
                 {settingsTab === 'appearance' && (
-                    <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
+                    <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700" style={{ minHeight: '500px', background: 'rgba(0,0,0,0.3)', padding: '20px', borderRadius: '20px' }}>
                         {/* Rendimiento */}
                         <div className="flex justify-between items-center bg-gradient-to-r from-yellow-500/10 to-transparent p-5 rounded-2xl border border-yellow-500/20 shadow-inner group transition-all hover:bg-yellow-500/20">
                              <div className="flex items-center gap-4">
                                  <div className="w-10 h-10 rounded-full flex items-center justify-center bg-yellow-400/20 text-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.3)] group-hover:scale-110 transition-transform"><i className="fa-solid fa-bolt"></i></div>
-                                 <div>
-                                     <h4 className="text-base font-black text-white">Modo Máximo Rendimiento</h4>
-                                     <p className="text-xs text-white/50">Desactiva animaciones avanzadas, efectos de vidrio e IA difuminada para PCs ligeras.</p>
-                                 </div>
+<div>
+                                      <h4 className="text-base font-black text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>Modo Máximo Rendimiento</h4>
+                                      <p className="text-xs" style={{ color: '#ffffff', opacity: 0.7 }}>Desactiva animaciones avanzadas, efectos de vidrio e IA difuminada para PCs ligeras.</p>
+                                  </div>
                              </div>
                              <ToggleSwitch active={performanceMode} onClick={togglePerformanceMode} iconOn="fa-check" iconOff="fa-times" />
                         </div>
 
                         <div className="flex justify-end gap-3 mb-2">
-                             <button onClick={() => setThemeSettings({ blur: 30, saturate: 210, opacity: 70, primaryColor: '#5865f2', backgroundColor: '', baseTheme: '' })}
-                                    className="text-xs glass-panel hover:bg-white/10 border border-white/10 px-5 py-2.5 rounded-xl text-white/70 font-semibold transition-all shadow-md"><i className="fa-solid fa-undo mr-1.5"></i> Restaurar</button>
-                             <button onClick={handleManualSaveTheme} className="bg-gradient-to-r from-discord-blurple to-purple-600 hover:from-purple-500 hover:to-discord-blurple text-white text-xs font-black py-2.5 px-6 rounded-xl shadow-[0_0_20px_rgba(88,101,242,0.4)] hover:scale-105 active:scale-95 transition-all flex items-center gap-2 border border-white/20">
+<button onClick={() => setThemeSettings({ blur: 30, saturate: 210, opacity: 70, primaryColor: '#5865f2', backgroundColor: '', baseTheme: '' })}
+                                     className="text-xs border border-white/10 px-5 py-2.5 rounded-xl font-semibold transition-all shadow-md" style={{ background: 'rgba(0,0,0,0.5)', color: '#ffffff', opacity: 0.8 }}><i className="fa-solid fa-undo mr-1.5"></i> Restaurar</button>
+                             <button onClick={handleManualSaveTheme} className="bg-gradient-to-r from-discord-blurple to-purple-600 hover:from-purple-500 hover:to-discord-blurple text-white text-xs font-black py-2.5 px-6 rounded-xl shadow-[0_0_20px_rgba(88,101,242,0.4)] hover:scale-105 active:scale-95 transition-all flex items-center gap-2 border border-white/20" style={{ color: '#ffffff' }}>
                                 <i className="fa-solid fa-floppy-disk"></i> GUARDAR DISEÑO PERMANENTE
                              </button>
                         </div>
@@ -167,7 +181,7 @@ const SettingsView = ({
                         {/* Temas Base */}
                         <section className="glass-panel p-6 rounded-3xl border border-white/10 relative overflow-hidden shadow-2xl">
                             <div className="mb-6 relative z-10">
-                                <h3 className="text-lg font-black text-white flex items-center gap-2 mb-1"><i className="fa-solid fa-moon text-discord-blurple"></i> Base del Sistema</h3>
+                                <h3 className="text-lg font-black text-white flex items-center gap-2 mb-1" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}><i className="fa-solid fa-moon text-discord-blurple"></i> Base del Sistema</h3>
                                 <p className="text-xs text-white/40">Estructura colorimétrica global.</p>
                             </div>
                             <div className="flex gap-4 relative z-10">
@@ -189,7 +203,7 @@ const SettingsView = ({
                         {/* Liquid Builder */}
                         <section className="glass-panel p-8 rounded-3xl border border-white/10 shadow-2xl relative">
                             <div className="mb-8">
-                                <h3 className="text-lg font-black text-white flex items-center gap-2 mb-1"><i className="fa-solid fa-palette text-discord-blurple"></i> Liquid Glass Builder</h3>
+                                <h3 className="text-lg font-black text-white flex items-center gap-2 mb-1" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}><i className="fa-solid fa-palette text-discord-blurple"></i> Liquid Glass Builder</h3>
                                 <p className="text-xs text-white/40">Modifica la refracción y el tinte del reproductor en tiempo real.</p>
                             </div>
 
@@ -237,12 +251,12 @@ const SettingsView = ({
 
                 {/* AUDIO */}
                 {settingsTab === 'audio' && (
-                    <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
+                    <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700" style={{ minHeight: '500px' }}>
                         <section className="glass-panel p-8 rounded-3xl border border-white/10 shadow-2xl relative overflow-hidden group">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-discord-blurple/20 rounded-full blur-3xl -mr-10 -mt-10 transition-all group-hover:bg-discord-blurple/30 pointer-events-none"></div>
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative z-10 mb-6">
                                  <div>
-                                      <h3 className="text-xl font-black text-white flex items-center gap-3 tracking-tight"><i className="fa-solid fa-headphones text-discord-blurple text-2xl"></i> Ruteo de Audio</h3>
+                                      <h3 className="text-xl font-black text-white flex items-center gap-3 tracking-tight" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}><i className="fa-solid fa-headphones text-discord-blurple text-2xl"></i> Ruteo de Audio</h3>
                                       <p className="text-xs text-white/50 mt-1">Modifica el dispositivo de salida físico.</p>
                                  </div>
                                  <button onClick={handleDeviceSelect} className="px-6 py-3 bg-white hover:bg-gray-200 text-black rounded-xl text-sm font-black transition-all flex items-center gap-2 shadow-[0_0_15px_rgba(255,255,255,0.3)]">
@@ -268,12 +282,12 @@ const SettingsView = ({
 
                 {/* PLAYBACK */}
                 {settingsTab === 'playback' && (
-                    <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
+                    <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700" style={{ minHeight: '500px' }}>
                         <section className="glass-panel p-8 md:p-10 rounded-3xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.3)]">
                             <div className="flex items-center gap-4 mb-10 pb-6 border-b border-white/10">
                                 <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-discord-blurple to-purple-600 flex items-center justify-center text-white shadow-lg"><i className="fa-solid fa-sliders text-2xl"></i></div>
                                 <div>
-                                    <h3 className="text-2xl font-black text-white tracking-tight">Dinámica de Reproducción</h3>
+                                    <h3 className="text-2xl font-black text-white tracking-tight" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>Dinámica de Reproducción</h3>
                                     <p className="text-xs text-white/50 mt-1">Flujo y experiencia continua</p>
                                 </div>
                             </div>
@@ -326,11 +340,11 @@ const SettingsView = ({
 
                 {/* CONNECTION */}
                 {settingsTab === 'connection' && (
-                    <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
+                    <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700" style={{ minHeight: '500px' }}>
                         <section className="glass-panel p-8 rounded-3xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.3)]">
                             <div className="flex justify-between items-center mb-8 pb-6 border-b border-white/10">
                                 <div>
-                                    <h3 className="text-2xl font-black text-white flex items-center gap-3 tracking-tight"><i className="fa-solid fa-satellite-dish text-discord-blurple"></i> Control Remoto Web</h3>
+                                    <h3 className="text-2xl font-black text-white flex items-center gap-3 tracking-tight" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}><i className="fa-solid fa-satellite-dish text-discord-blurple"></i> Control Remoto Web</h3>
                                     <p className="text-xs text-white/50 mt-2">Maneja todo tu reproductor desde un navegador en el teléfono (LAN recomendada).</p>
                                 </div>
                                 <ToggleSwitch active={remoteEnabled} onClick={() => setRemoteEnabled(!remoteEnabled)} iconOn="fa-wifi" iconOff="fa-ban" />
@@ -367,19 +381,19 @@ const SettingsView = ({
 
                 {/* ADVANCED - EXPERT */}
                 {settingsTab === 'advanced' && (
-                    <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
+                    <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700" style={{ minHeight: '500px' }}>
                         <section className="glass-panel p-8 rounded-3xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.3)]">
                             <div className="flex items-center justify-between mb-8 pb-4 border-b border-discord-blurple/20">
-                                <h3 className="text-xl font-black text-white flex items-center gap-3"><i className="fa-solid fa-microchip text-discord-blurple"></i> Monitor del Motor Principal</h3>
+                                <h3 className="text-xl font-black text-white flex items-center gap-3" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}><i className="fa-solid fa-microchip text-discord-blurple"></i> Monitor del Motor Principal</h3>
                                 <span className="flex items-center gap-2 bg-red-500/10 text-red-400 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest"><span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> Sistema Online</span>
                             </div>
                             
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                                 {[
-                                    { label: 'Uso de CPU', val: `${sysStats?.cpu_usage || 0}%`, perc: sysStats?.cpu_usage || 0, color: 'bg-blue-500' },
-                                    { label: 'RAM / VRAM', val: `${sysStats?.memory_usage || 0}%`, perc: sysStats?.memory_usage || 0, color: 'bg-purple-500' },
-                                    { label: 'Hilos Audio', val: '12.4%', perc: 12.4, color: 'bg-green-500' },
-                                    { label: 'Disco (I/O)', val: '2.1%', perc: 2.1, color: 'bg-yellow-500' }
+                                    { label: 'Uso de CPU', val: `${sysStats?.cpu_percent || 0}%`, perc: sysStats?.cpu_percent || 0, color: 'bg-blue-500' },
+                                    { label: 'RAM / VRAM', val: `${sysStats?.ram_percent || 0}%`, perc: sysStats?.ram_percent || 0, color: 'bg-purple-500' },
+                                    { label: 'Hilos Audio', val: `${sysStats?.gpu_percent || 0}%`, perc: sysStats?.gpu_percent || 0, color: 'bg-green-500' },
+                                    { label: 'Disco (I/O)', val: `${sysStats?.vram_percent || 0}%`, perc: sysStats?.vram_percent || 0, color: 'bg-yellow-500' }
                                 ].map(st => (
                                     <div key={st.label} className="bg-black/30 p-5 rounded-2xl border border-white/5 flex flex-col justify-between shadow-inner group hover:bg-white/5 transition-all">
                                         <div className="flex justify-between items-end mb-4">
@@ -396,7 +410,7 @@ const SettingsView = ({
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <section className="glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl relative overflow-hidden group">
-                                <h3 className="text-sm font-black text-white mb-4 uppercase tracking-widest flex items-center gap-2"><i className="fa-solid fa-brain text-discord-blurple"></i> Configuración de IA</h3>
+                                <h3 className="text-sm font-black text-white mb-4 uppercase tracking-widest flex items-center gap-2" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}><i className="fa-solid fa-brain text-discord-blurple"></i> Configuración de IA</h3>
                                 <div className="space-y-4">
                                     <div className="bg-black/30 p-4 rounded-xl border border-white/5 flex flex-col gap-1">
                                         <span className="text-[10px] font-black uppercase text-white/40">Proveedor Activo</span>
@@ -416,7 +430,7 @@ const SettingsView = ({
                             <section className="glass-panel p-6 rounded-3xl border border-red-500/20 shadow-2xl relative overflow-hidden group bg-gradient-to-br from-transparent to-red-500/5">
                                  <div className="flex flex-col h-full justify-between">
                                      <div>
-                                         <h3 className="text-sm font-black text-red-500 mb-2 uppercase tracking-widest flex items-center gap-2"><i className="fa-solid fa-triangle-exclamation"></i> Zona de Peligro</h3>
+                                         <h3 className="text-sm font-black text-red-500 mb-2 uppercase tracking-widest flex items-center gap-2" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}><i className="fa-solid fa-triangle-exclamation"></i> Zona de Peligro</h3>
                                          <p className="text-[10px] text-white/50 leading-relaxed max-w-[90%]">Maneja la base de datos de manera irreversible. Borrar la biblioteca eliminará todo el metadata almacenado, listas de reprodución locales y la memoria de escaneo de IA.</p>
                                      </div>
                                      <button onClick={clearLibrary} className="mt-4 bg-red-500/10 hover:bg-red-500/30 text-red-400 hover:text-red-300 text-xs px-6 py-4 rounded-xl border border-red-500/30 transition-all font-black flex items-center justify-center gap-2 shadow-lg">
@@ -430,7 +444,7 @@ const SettingsView = ({
 
                 {/* ABOUT */}
                 {settingsTab === 'about' && (
-                    <div className="flex flex-col items-center gap-6 p-8 md:p-14 text-center animate-in zoom-in duration-700 max-w-3xl mx-auto">
+                    <div className="flex flex-col items-center gap-6 p-8 md:p-14 text-center animate-in zoom-in duration-700 max-w-3xl mx-auto" style={{ minHeight: '500px' }}>
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-discord-blurple/10 rounded-full blur-[100px] pointer-events-none"></div>
                         
                         <p className="text-[10px] text-white/30 font-black uppercase tracking-[0.5em] mb-4 relative z-10 drop-shadow-md">SISTEMA CÚANTICO</p>

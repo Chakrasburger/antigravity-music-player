@@ -12,7 +12,7 @@ from backend.core.config import PORT, STATIC_DIR
 from backend.services.library_service import sync_library
 from backend.services.remote_service import init_remote_service
 from backend.handlers.get_handlers import handle_local_ip, handle_remote_status, handle_remote_html, handle_system_monitor, handle_file_api, handle_cover_api
-from backend.handlers.post_handlers import handle_yt_search_api, handle_download_api, handle_ai_chat_api, handle_sync_api
+from backend.handlers.post_handlers import handle_yt_search_api, handle_download_api, handle_ai_chat_api, handle_sync_api, handle_lyrics_search_api
 
 class ModularChakrasHandler(http.server.SimpleHTTPRequestHandler):
     
@@ -60,6 +60,8 @@ class ModularChakrasHandler(http.server.SimpleHTTPRequestHandler):
             handle_ai_chat_api(self, data)
         elif parsed_path.path == '/api/sync':
             handle_sync_api(self)
+        elif parsed_path.path == '/api/lyrics/search':
+            handle_lyrics_search_api(self, data)
         else:
             self.send_response(404)
             self.end_headers()

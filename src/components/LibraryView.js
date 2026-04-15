@@ -60,11 +60,12 @@ const LibraryView = ({
                 </div>
             ) : (
                 <div className="flex-1 flex flex-col min-h-0 bg-black/10 rounded-lg border border-white/5 overflow-hidden">
-                    <div className="w-full grid grid-cols-[48px_1fr_minmax(120px,25%)_80px] border-b border-discord-border/50 text-discord-muted text-xs font-bold uppercase tracking-wider py-3 px-2">
+                    <div className="w-full grid grid-cols-[48px_1fr_minmax(120px,25%)_80px_80px] border-b border-discord-border/50 text-discord-muted text-xs font-bold uppercase tracking-wider py-3 px-2">
                         <div className="text-center">#</div>
                         <div className="px-4">Title</div>
                         <div className="px-4 hidden md:block">Album</div>
                         <div className="px-4 text-right"><i className="fa-regular fa-clock"></i></div>
+                        <div className="px-4 text-right">Reproducciones</div>
                     </div>
 
                     <div
@@ -153,25 +154,26 @@ const LibraryView = ({
                                             {track.isDownloading ? 'Descargando...' : (track.album && track.album !== 'Unknown Album' && track.album !== 'Descargas de YT' ? track.album : '-')}
                                         </div>
 
-                                        <div className="px-4 flex items-center justify-end gap-3">
-                                            {!track.isDownloading && (
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        const newRating = track.rating === 1 ? 0 : 1;
-                                                        if (window.StorageApi) window.StorageApi.rateTrack(track.id, newRating);
-                                                        setLibrary(prev => prev.map(t => t.id === track.id ? { ...t, rating: newRating } : t));
-                                                        if (view === 'queue') {
-                                                            setPlaybackQueue(prev => prev.map(t => t.id === track.id ? { ...t, rating: newRating } : t));
-                                                        }
-                                                    }}
-                                                    className={`transition-colors p-1 rounded-full ${track.rating === 1 ? 'text-red-500 bg-red-500/10' : 'text-discord-muted hover:text-red-500'}`}
-                                                >
-                                                    <i className={track.rating === 1 ? "fa-solid fa-heart" : "fa-regular fa-heart"}></i>
-                                                </button>
-                                            )}
-                                            <span className="text-xs text-discord-muted font-mono">{track.isDownloading ? '-' : (window.formatTime ? window.formatTime(track.duration) : '0:00')}</span>
-                                        </div>
+<div className="px-4 flex items-center justify-end gap-3">
+                                             <span className="text-xs text-discord-muted font-mono">{track.play_count || 0}</span>
+                                             {!track.isDownloading && (
+                                                 <button
+                                                     onClick={(e) => {
+                                                         e.stopPropagation();
+                                                         const newRating = track.rating === 1 ? 0 : 1;
+                                                         if (window.StorageApi) window.StorageApi.rateTrack(track.id, newRating);
+                                                         setLibrary(prev => prev.map(t => t.id === track.id ? { ...t, rating: newRating } : t));
+                                                         if (view === 'queue') {
+                                                             setPlaybackQueue(prev => prev.map(t => t.id === track.id ? { ...t, rating: newRating } : t));
+                                                         }
+                                                     }}
+                                                     className={`transition-colors p-1 rounded-full ${track.rating === 1 ? 'text-red-500 bg-red-500/10' : 'text-discord-muted hover:text-red-500'}`}
+                                                 >
+                                                     <i className={track.rating === 1 ? "fa-solid fa-heart" : "fa-regular fa-heart"}></i>
+                                                 </button>
+                                             )}
+                                             <span className="text-xs text-discord-muted font-mono">{track.isDownloading ? '-' : (window.formatTime ? window.formatTime(track.duration) : '0:00')}</span>
+                                         </div>
                                     </div>
                                 );
                             })}
